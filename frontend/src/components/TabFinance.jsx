@@ -31,7 +31,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
   const [salePrice, setSalePrice] = useState('380000');
   const [costPrice, setCostPrice] = useState('120000');
   const [businessType, setBusinessType] = useState('resale'); // 'resale' (Китай/опт), 'production' (своё), 'services'
-  const [tradeRegime, setTradeRegime] = useState('ecommerce'); // 'ecommerce' (2%), 'standard' (4%)
+  const [tradeRegime, setTradeRegime] = useState('ecommerce'); // 'ecommerce' (1%), 'standard' (1%)
   const [category, setCategory] = useState('craft');
   const [fixedCosts, setFixedCosts] = useState('2500000');
   const [channelTab, setChannelTab] = useState('all'); // 'all', 'uzum', 'telegram', 'breakeven'

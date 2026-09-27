@@ -30,9 +30,9 @@ TELEGRAM_API_BASE = "https://api.telegram.org"
 
 DAILY_TIPS_UZ = [
     "💡 <b>Savdo maslahati:</b> Uzum Market'da sotayotganda, mahsulot tannarxiga kamida 25-30% ustama qo'ying. Bu marketpleysning 12% komissiyasi va 15 000 so'm logistika to'lovini qoplaydi hamda sizga sof foyda qoldiradi.",
-    "🧵 <b>Hunarmand qizlar uchun:</b> PQ-4742 qaroriga ko'ra, o'z qo'lingiz bilan yasagan milliy buyumlarni sotsangiz, daromad solig'i 0%! Faqat pensiya staji uchun yiliga 1 marta ixtiyoriy 1 BHM (440 000 so'm) to'lash kifoya.",
+    "🧵 <b>Hunarmand qizlar uchun:</b> «Hunarmand» uyushmasi a'zolari uchun soliq 0%! Boshqa o'z-o'zini band qilganlarda esa 2026-yildan 1% yagona aylanma solig'i amal qiladi.",
     "📸 <b>Vizual marketing:</b> Instagram va Telegram kanalda mahsulotni faqat oq fonda emas, balki 'hayotiy' muhitda (masalan, kiyimni qizlar kiygan holda, dasturxonni bezatilgan holda) ko'rsatish sotuvni 40% ga oshiradi.",
-    "📦 <b>Qayta sotish (Xitoy/bozor):</b> E'tibor bering! Xitoydan yoki ulgurji bozordan olib qayta sotishda o'z-o'zini band qilish QONUN BO'YICHA TAQIQLANGAN. Jarimaga tushmaslik uchun YaTT (1% yoki 2% soliq) ochish shart.",
+    "📦 <b>Qayta sotish (Xitoy/bozor):</b> E'tibor bering! Xitoydan yoki ulgurji bozordan olib qayta sotishda o'z-o'zini band qilish QONUN BO'YICHA TAQIQLANGAN. Jarimaga tushmaslik uchun YaTT (yagona 1% soliq) ochish shart.",
     "💳 <b>To'lov tizimlari:</b> Telegram bot yoki Instagram do'konda Click va Payme ulash — xaridor ishonchini 2 barobar oshiradi. Click/Payme ekvayring komissiyasi odatda 1.5% ni tashkil qiladi.",
     "🏷️ <b>Xaridorni jalb qilish:</b> Narxni 199 000 so'm yoki 249 000 so'm qilib belgilash (psixologik narxlash) yaxlit 200 000 yoki 250 000 so'mdan ko'ra 15% ko'proq buyurtma olib keladi.",
 ]
@@ -42,9 +42,9 @@ TAX_CALENDAR_TEXT_UZ = (
     "📌 <b>Har oyning 15-sanasigacha:</b>\n"
     "• YaTT uchun majburiy ijtimoiy soliq — 1 BHM (440 000 so'm). Soliq mobil ilovasi orqali to'lanadi.\n\n"
     "📌 <b>Chorak yakuni bo'yicha (har 3 oyda):</b>\n"
-    "• Aylanmadan olinadigan soliq (1% ishlab chiqarish/savdo, 2% Uzum e-tijorat, 4% xizmatlar) — chorakdan keyingi oyning 15-sanasigacha.\n\n"
+    "• Aylanmadan olinadigan soliq (yagona 1% stavka, SK 467-modda) — chorakdan keyingi oyning 15-sanasigacha.\n\n"
     "📌 <b>O'z-o'zini band qilganlar:</b>\n"
-    "• Daromad solig'i — 0% (yiliga 100 mln so'mgacha).\n"
+    "• Aylanmadan olinadigan soliq — 1% (2026-yildan joriy etilgan, SK 467-modda).\n"
     "• Pensiya staji uchun ijtimoiy soliq — yil davomida ixtiyoriy 1 BHM.\n\n"
     "⚠️ <b>Yillik aylanma 1 mlrd so'mdan oshsa:</b>\n"
     "QQS (12%) to'lovchisi sifatida ro'yxatdan o'tish majburiyati vujudga keladi."
@@ -459,7 +459,7 @@ class TelegramService:
             f"• <b>Sof foyda:</b> <b>{res.uzum_net:,.0f} so'm</b>\n"
             f"• Zararsiz minimal narx: {res.min_price_uzum:,.0f} so'm\n"
             f"─────────────────────\n"
-            f"🏛️ <b>Davlatga soliq (YaTT e-tijorat 2%):</b> {res.tax_payable_item:,.0f} so'm\n"
+            f"🏛️ <b>Davlatga soliq (1%):</b> {res.tax_payable_item:,.0f} so'm\n"
             f"📌 <b>YaTT oylik ijtimoiy solig'i:</b> {res.social_tax_monthly:,.0f} so'm (1 BHM)\n\n"
             f"<i>💡 O'z narxlaringizni kiritish uchun: <code>/tax 450000 180000</code></i>"
         )
@@ -588,7 +588,7 @@ class TelegramService:
             f"💰 <b>Sotish narxi:</b> {res.sale_price:,.0f} so'm\n"
             f"📦 <b>Tannarx:</b> {res.cost_price:,.0f} so'm\n"
             f"🛍️ <b>Uzum Market sof foyda:</b> <b>{res.uzum_net:,.0f} so'm</b>\n"
-            f"🏛️ <b>Davlatga soliq (2%):</b> {res.tax_payable_item:,.0f} so'm\n"
+            f"🏛️ <b>Davlatga soliq (1%):</b> {res.tax_payable_item:,.0f} so'm\n"
             f"📈 <b>Marja:</b> {res.margin_pct}%\n\n"
             f"<i>🌿 Oqila AI yordamida hisoblandi</i>"
         )

@@ -428,15 +428,15 @@ async function runCalc() {
       sale_price: sale,
       gross_profit: gross,
       margin_pct: margin,
-      self_employed_tax: 0,
-      self_employed_net: gross,
+      self_employed_tax: Math.round(sale * 0.01),
+      self_employed_net: Math.round(gross - (sale * 0.01)),
       yatt_turnover_tax: Math.round(sale * 0.01),
       net_profit: gross,
       min_price_uzum: Math.round((cost + 5250) / 0.85),
       min_price_direct: cost + 15000,
       tip: state.lang === 'uz'
-        ? "✅ <b>PQ-4742:</b> 100 mln so'mgacha 0% soliq. <b>SK 467-modda:</b> YaTT uchun 1% aylanma solig'i."
-        : "✅ <b>ПП-4742:</b> До 100 млн сум налог 0%. <b>Ст. 467 НК РУз:</b> Для ЯТТ налог с оборота 1%.",
+        ? "✅ <b>SK 467-modda:</b> YaTT va o'z-o'zini band qilganlar uchun yagona 1% aylanma solig'i."
+        : "✅ <b>Ст. 467 НК РУз:</b> Единый налог 1% с оборота для ЯТТ и самозанятых.",
     });
   }
 }

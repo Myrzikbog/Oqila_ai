@@ -179,7 +179,7 @@ def calculate(
     lang: str = "ru",
     category: str = "craft",
     business_type: str = "resale",           # 'resale' (Китай/опт), 'production' (своё), 'services'
-    trade_regime: str = "ecommerce",         # 'ecommerce' (2% маркетплейс), 'standard' (4% розница)
+    trade_regime: str = "ecommerce",         # 'ecommerce' (1% маркетплейс), 'standard' (1% розница)
     yatt_type: str = "production",           # legacy fallback
     fixed_costs: float = 0.0,
 ) -> CalcResult:

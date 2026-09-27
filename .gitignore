@@ -8,6 +8,7 @@ __pycache__/
 *.egg
 *.egg-info/
 dist/
+!frontend/dist/
 build/
 eggs/
 parts/
@@ -66,6 +67,6 @@ temp/
 node_modules/
 .npm
 frontend/node_modules/
-frontend/dist/
+# frontend/dist/ (included for production serving without needing Node.js on server)
 frontend/dist-ssr/
 

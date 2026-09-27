@@ -57,11 +57,11 @@ export default function OnboardingModal({ isOpen, onClose, t, lang }) {
             <div className="text-[10px] text-slate-500 dark:text-slate-400">
               {lang === 'uz' ? "O'z-o'zini band qilish" : "Самозанятые"}
             </div>
-            <div className="text-xs font-black text-emerald-600 dark:text-emerald-400">0% soliq</div>
+            <div className="text-xs font-black text-emerald-600 dark:text-emerald-400">1% soliq</div>
           </div>
           <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/40">
             <div className="text-[10px] text-slate-500 dark:text-slate-400">Uzum Market</div>
-            <div className="text-xs font-black text-purple-600 dark:text-purple-400">2% soliq + tarif</div>
+            <div className="text-xs font-black text-purple-600 dark:text-purple-400">1% soliq + tarif</div>
           </div>
         </div>
       ),

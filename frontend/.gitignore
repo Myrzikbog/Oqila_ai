@@ -8,7 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist (tracked so production server gets pre-built Vite assets without needing npm build on server)
 dist-ssr
 *.local
 
