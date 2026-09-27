@@ -255,9 +255,9 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
             <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
               {profile.name} • {profile.status === 'self_employed' 
-                ? (lang === 'uz' ? "O'z-o'zini band qilish (0%)" : "Самозанятая (0%)") 
+                ? (lang === 'uz' ? "O'z-o'zini band qilish (1% soliq)" : "Самозанятая (1% налог)") 
                 : profile.status === 'yatt'
-                ? (lang === 'uz' ? "YaTT (1–4%)" : "ЯТТ (1–4%)")
+                ? (lang === 'uz' ? "YaTT (1% soliq)" : "ЯТТ (1% налог)")
                 : (lang === 'uz' ? "Rejalashtirish" : "Выбор статуса")}
             </span>
           </div>
@@ -310,9 +310,9 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               >
                 <div className="text-xs font-bold flex items-center justify-between">
                   <span>Uzum / Онлайн</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-brand-600 text-white font-black">2%</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-brand-600 text-white font-black">1%</span>
                 </div>
-                <div className="text-[10px] opacity-80 mt-0.5">Ст. 467 п. 3 НК РУз</div>
+                <div className="text-[10px] opacity-80 mt-0.5">{lang === 'uz' ? "Uzum soliq agenti" : "Агент маркетплейс"}</div>
               </button>
 
               <button
@@ -326,9 +326,9 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               >
                 <div className="text-xs font-bold flex items-center justify-between">
                   <span>Магазин / Розница</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-600 text-white font-black">4%</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-brand-600 text-white font-black">1%</span>
                 </div>
-                <div className="text-[10px] opacity-80 mt-0.5">Ст. 467 п. 1 НК РУз</div>
+                <div className="text-[10px] opacity-80 mt-0.5">Ст. 467 НК РУз (2026)</div>
               </button>
             </div>
           </div>
