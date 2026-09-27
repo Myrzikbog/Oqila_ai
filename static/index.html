@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#10b981" />
+  <title>Oqila AI — Tadbirkor Qizlar</title>
+
+  <!-- Telegram Mini App SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Custom styles -->
+  <link rel="stylesheet" href="/static/styles.css" />
+
+  <style>
+    /* Tailwind config extensions */
+    .rounded-2xl { border-radius: 1rem; }
+  </style>
+</head>
+
+<body>
+
+<!-- =====================================================
+     TOAST NOTIFICATION
+     ===================================================== -->
+<div id="toast" class="toast"></div>
+
+<!-- =====================================================
+     HEADER
+     ===================================================== -->
+<header class="hero-gradient text-white px-4 pt-safe pt-4 pb-5 relative overflow-hidden">
+  <!-- Decorative blobs -->
+  <div style="position:absolute;top:-30px;right:-30px;width:140px;height:140px;background:rgba(255,255,255,0.08);border-radius:50%;pointer-events:none"></div>
+  <div style="position:absolute;bottom:-20px;left:-20px;width:90px;height:90px;background:rgba(255,255,255,0.06);border-radius:50%;pointer-events:none"></div>
+
+  <div class="relative flex items-center justify-between">
+    <div>
+      <div class="flex items-center gap-2">
+        <span style="font-size:1.6rem">🌿</span>
+        <h1 class="text-xl font-black tracking-tight">Oqila AI</h1>
+      </div>
+      <p class="text-xs mt-0.5 opacity-80" data-i18n="subtitle">Карманный бизнес-ассистент</p>
+    </div>
+
+    <!-- AI Badge -->
+    <div class="ai-badge flex items-center gap-1.5 bg-white bg-opacity-20 rounded-full px-3 py-1.5">
+      <span class="w-2 h-2 rounded-full bg-white" style="animation:pulse-green 1.5s infinite"></span>
+      <span class="text-xs font-bold">AI Online</span>
+    </div>
+  </div>
+
+  <!-- Language Toggle -->
+  <div class="lang-toggle mt-3" style="max-width:220px">
+    <button data-lang="ru" class="active" onclick="setLang('ru')">🇷🇺 Русский</button>
+    <button data-lang="uz" onclick="setLang('uz')">🇺🇿 O'zbek</button>
+  </div>
+</header>
+
+<!-- =====================================================
+     MAIN CONTENT
+     ===================================================== -->
+<main class="content-area px-4 mt-4">
+
+  <!-- ===================================================
+       TAB 1 — AI Studio & Copywriter
+       =================================================== -->
+  <div id="tab-studio" class="tab-pane active">
+
+    <!-- Quick Demo Button — КРИТИЧНО для презентации! -->
+    <button id="demo-btn" class="btn-demo mb-3" onclick="runDemo()">
+      <span>✨</span> <span data-i18n="demo_btn">✨ Быстрое демо</span>
+    </button>
+
+    <!-- Upload Zone -->
+    <div class="section-title">📸 Фото товара / Mahsulot rasmi</div>
+    <div id="upload-zone" class="upload-zone p-4 mb-4 text-center">
+      <div class="flex flex-col items-center gap-3 py-6">
+        <span style="font-size:2.5rem">📸</span>
+        <p class="text-sm font-medium" style="color:var(--text-muted);white-space:pre-line" data-i18n="upload_hint">Загрузите фото товара
+(нажмите или перетащите)</p>
+      </div>
+    </div>
+    <input type="file" id="file-input" accept="image/*" class="hidden" style="display:none" />
+
+    <!-- Input fields -->
+    <div class="glass-card p-4 mb-4">
+      <div class="space-y-3">
+        <div>
+          <label class="section-title" data-i18n="cost_price">Себестоимость (сум)</label>
+          <input id="cost-price" type="number" min="0" class="input-field mt-1"
+            placeholder="Например: 120000" data-i18n-placeholder="cost_price" />
+        </div>
+        <div>
+          <label class="section-title" data-i18n="desired_price">Желаемая цена (сум)</label>
+          <input id="desired-price" type="number" min="0" class="input-field mt-1"
+            placeholder="Например: 380000" />
+        </div>
+        <div>
+          <label class="section-title" data-i18n="note">Описание (необязательно)</label>
+          <textarea id="note" rows="2" class="input-field mt-1"
+            placeholder="Атласный халат, ручная вышивка, размер 42-46"
+            style="resize:none"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Generate Button -->
+    <button id="gen-btn" class="btn-primary mb-2" onclick="generateCard()">
+      <span>🚀</span> <span data-i18n="gen_btn">Сгенерировать упаковку (AI Launch)</span>
+    </button>
+
+    <!-- Result Section -->
+    <div id="result-section" style="display:none"></div>
+
+  </div><!-- /tab-studio -->
+
+
+  <!-- ===================================================
+       TAB 2 — Calculator & Soliq
+       =================================================== -->
+  <div id="tab-calc" class="tab-pane">
+
+    <div class="glass-card p-4 mb-4">
+      <h2 class="text-lg font-bold mb-1">💹 Калькулятор прибыли</h2>
+      <p class="text-xs mb-4" style="color:var(--text-muted)">Расчёт с учётом налогов РУз и комиссий маркетплейсов</p>
+
+      <div class="space-y-3">
+        <div>
+          <label class="section-title" data-i18n="sale_price">Цена продажи</label>
+          <input id="calc-sale" type="number" min="0" class="input-field mt-1"
+            placeholder="Например: 380000 сум" oninput="runCalc()" />
+        </div>
+        <div>
+          <label class="section-title" data-i18n="cost_price_calc">Себестоимость</label>
+          <input id="calc-cost" type="number" min="0" class="input-field mt-1"
+            placeholder="Например: 120000 сум" oninput="runCalc()" />
+        </div>
+      </div>
+    </div>
+
+    <div id="calc-results" style="display:none"></div>
+
+    <!-- Tax info cards -->
+    <div class="mt-4 space-y-3">
+      <div class="section-title">🏛️ Налоговые режимы Узбекистана</div>
+
+      <div class="glass-card p-4" style="border-left:4px solid var(--emerald)">
+        <div class="flex items-start gap-3">
+          <span style="font-size:1.5rem">🆓</span>
+          <div>
+            <p class="font-bold text-sm">Самозанятый (O'z-o'zini band etgan)</p>
+            <p class="text-xs mt-1" style="color:var(--text-muted)">
+              <strong style="color:var(--emerald-dark)">0% налог</strong> на доходы для 100+ видов деятельности.
+              Регистрация бесплатна через приложение Soliq за 5 минут.
+            </p>
+            <a href="https://my.soliq.uz" target="_blank" class="text-xs font-semibold mt-1 block" style="color:var(--lavender-dark)">
+              🔗 my.soliq.uz →
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4" style="border-left:4px solid var(--gold)">
+        <div class="flex items-start gap-3">
+          <span style="font-size:1.5rem">💼</span>
+          <div>
+            <p class="font-bold text-sm">ЯТТ — Индивидуальный предприниматель</p>
+            <p class="text-xs mt-1" style="color:var(--text-muted)">
+              <strong style="color:var(--gold)">1% фиксированный налог</strong> от дохода.
+              Подходит при доходе свыше 10 млн сум/месяц. Открытие через OneID.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4" style="border-left:4px solid var(--lavender)">
+        <div class="flex items-start gap-3">
+          <span style="font-size:1.5rem">🛍️</span>
+          <div>
+            <p class="font-bold text-sm">Комиссии маркетплейсов</p>
+            <p class="text-xs mt-1" style="color:var(--text-muted)">
+              <strong>Uzum Market:</strong> ~15% комиссия + доставка<br>
+              <strong>Click/Payme:</strong> 1–1.5% за транзакцию<br>
+              <strong>Instagram Direct:</strong> 0% (если принимаете наличными или Click QR)
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab-calc -->
+
+
+  <!-- ===================================================
+       TAB 3 — Legal Guide
+       =================================================== -->
+  <div id="tab-legal" class="tab-pane">
+
+    <div class="mission-card mb-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span style="font-size:1.5rem">⚖️</span>
+        <h2 class="font-black text-lg" data-i18n="legal_title">Юридический гид</h2>
+      </div>
+      <p class="text-sm opacity-90" data-i18n="legal_subtitle">Легализуй бизнес за 10 минут</p>
+    </div>
+
+    <!-- Step-by-step guide -->
+    <div class="section-title">📋 Пошаговый мастер / Bosqichma-bosqich</div>
+    <div id="legal-steps-container" class="space-y-3 mb-6">
+      <div class="flex items-center justify-center py-8">
+        <span class="spinner dark"></span>
+      </div>
+    </div>
+
+    <!-- Legal AI Chat -->
+    <div class="glass-card overflow-hidden">
+      <div class="p-3 hero-gradient">
+        <div class="flex items-center gap-2">
+          <span>🤖</span>
+          <p class="font-bold text-sm text-white">OqilaLegal — AI Юридический консультант</p>
+        </div>
+      </div>
+
+      <div id="chat-messages"
+        class="flex flex-col gap-3 p-3 overflow-y-auto"
+        style="min-height:180px;max-height:280px"></div>
+
+      <div class="p-3 border-t" style="border-color:var(--border)">
+        <div class="flex gap-2">
+          <textarea id="legal-input" rows="1"
+            class="input-field flex-1 text-sm"
+            style="resize:none;min-height:42px;max-height:80px"
+            placeholder="Задайте правовой вопрос..."
+            data-i18n="chat_placeholder"></textarea>
+          <button id="send-btn" class="btn-send" onclick="sendLegalQuestion()">
+            <span data-i18n="send">Отправить</span>
+          </button>
+        </div>
+        <p class="text-xs mt-2 text-center" style="color:var(--text-muted)">
+          💡 Пример: «Как принимать оплату через Click?», «Нужна ли лицензия для продажи одежды?»
+        </p>
+      </div>
+    </div>
+
+  </div><!-- /tab-legal -->
+
+
+  <!-- ===================================================
+       TAB 4 — About / Oqila AI
+       =================================================== -->
+  <div id="tab-about" class="tab-pane">
+
+    <!-- Mission Card -->
+    <div class="mission-card mb-4">
+      <div class="flex items-center gap-3 mb-3">
+        <span style="font-size:2rem">✨</span>
+        <div>
+          <h2 class="font-black text-xl">Oqila AI</h2>
+          <p class="text-sm opacity-80">Интеллектуальная экосистема для женского предпринимательства</p>
+        </div>
+      </div>
+      <p class="text-sm opacity-90">
+        Oqila AI — карманный AI-ассистент для женщин-предпринимательниц, ремесленниц и микробизнеса
+        по всему Узбекистану. Автоматизирует упаковку, копирайтинг, финансовый расчет и юридический комплаенс.
+      </p>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="section-title">📊 Потенциал платформы</div>
+    <div class="grid grid-cols-2 gap-3 mb-5">
+      <div class="stat-card">
+        <div class="stat-number">2.3M+</div>
+        <div class="stat-label">Женщин в малом бизнесе РУз</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">78%</div>
+        <div class="stat-label">Используют Instagram для продаж</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">10 мин</div>
+        <div class="stat-label">Создание карточки товара с AI</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-number">0%</div>
+        <div class="stat-label">Налог для самозанятых РУз</div>
+      </div>
+    </div>
+
+    <!-- Live Platform Activity (SQLite Metrics) -->
+    <div class="section-title">⚡ Активность на хакатоне (Live SQLite Metrics)</div>
+    <div class="grid grid-cols-3 gap-2 mb-5" id="live-stats-container">
+      <div class="stat-card" style="border-color:rgba(16,185,129,0.3)">
+        <div class="stat-number" id="stat-ai-count" style="color:var(--emerald-dark)">0</div>
+        <div class="stat-label">AI Упаковок</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(245,158,11,0.3)">
+        <div class="stat-number" id="stat-calc-count" style="color:var(--gold)">0</div>
+        <div class="stat-label">Расчётов</div>
+      </div>
+      <div class="stat-card" style="border-color:rgba(139,92,246,0.3)">
+        <div class="stat-number" id="stat-legal-count" style="color:var(--lavender-dark)">0</div>
+        <div class="stat-label">Юр. ответов</div>
+      </div>
+    </div>
+
+    <!-- Problem / Solution -->
+    <div class="glass-card p-4 mb-4">
+      <h3 class="font-bold mb-2">🎯 Проблема</h3>
+      <ul class="text-sm space-y-1.5" style="color:var(--text-muted)">
+        <li>❌ 40% ремесленниц теряют продажи из-за слабого описания товаров</li>
+        <li>❌ Юридическая неграмотность — большинство работают нелегально</li>
+        <li>❌ Нет инструментов для расчёта правильной цены</li>
+        <li>❌ Языковой барьер (нет контента на узбекском)</li>
+      </ul>
+    </div>
+
+    <div class="glass-card p-4 mb-4" style="border-color:var(--emerald)">
+      <h3 class="font-bold mb-2" style="color:var(--emerald-dark)">✅ Решение — Oqila AI</h3>
+      <ul class="text-sm space-y-1.5" style="color:var(--text-primary)">
+        <li>🤖 AI-копирайтинг на O'zbek / Русском за 10 секунд</li>
+        <li>📊 Умный калькулятор с учётом налогов РУз и комиссий Uzum</li>
+        <li>⚖️ Юридический гид: регистрация самозанятости за 10 минут</li>
+        <li>📱 Telegram Mini App — работает без установки, на любом телефоне</li>
+      </ul>
+    </div>
+
+    <!-- Roadmap -->
+    <div class="glass-card p-4 mb-4" style="border-color:var(--lavender)">
+      <h3 class="font-bold mb-3">🗺️ Дорожная карта масштабирования</h3>
+      <div class="space-y-2">
+        <div class="flex items-start gap-2">
+          <span class="text-sm font-bold" style="color:var(--emerald-dark);min-width:60px">MVP</span>
+          <p class="text-sm" style="color:var(--text-muted)">Ремесленницы, рынок Чорсу, Ташкент</p>
+        </div>
+        <div class="flex items-start gap-2">
+          <span class="text-sm font-bold" style="color:var(--gold);min-width:60px">v2.0</span>
+          <p class="text-sm" style="color:var(--text-muted)">Все регионы РУз, интеграция с Uzum API</p>
+        </div>
+        <div class="flex items-start gap-2">
+          <span class="text-sm font-bold" style="color:var(--lavender-dark);min-width:60px">v3.0</span>
+          <p class="text-sm" style="color:var(--text-muted)">Экспорт на рынки ЦА, AI-видео для Reels</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Team / Footer -->
+    <div class="text-center pb-4">
+      <div class="flex items-center justify-center gap-2 mb-2">
+        <span style="font-size:1.2rem">🌿</span>
+        <span class="font-black text-lg" style="background:linear-gradient(135deg,var(--emerald),var(--lavender));-webkit-background-clip:text;-webkit-text-fill-color:transparent">Oqila AI</span>
+      </div>
+      <p class="text-xs" style="color:var(--text-muted)">Tadbirkor Ayollar • Oqila AI Platform</p>
+      <p class="text-xs mt-1" style="color:var(--text-muted)">Powered by FastAPI & Telegram WebApp</p>
+    </div>
+
+  </div><!-- /tab-about -->
+
+</main>
+
+<!-- =====================================================
+     BOTTOM NAVIGATION BAR
+     ===================================================== -->
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-tab="studio" onclick="switchTab('studio')">
+    <span class="nav-icon">✨</span>
+    <span class="nav-label" data-i18n="tab_studio">Студия</span>
+  </button>
+  <button class="nav-btn" data-tab="calc" onclick="switchTab('calc')">
+    <span class="nav-icon">💹</span>
+    <span class="nav-label" data-i18n="tab_calc">Финансы</span>
+  </button>
+  <button class="nav-btn" data-tab="legal" onclick="switchTab('legal')">
+    <span class="nav-icon">⚖️</span>
+    <span class="nav-label" data-i18n="tab_legal">Право</span>
+  </button>
+  <button class="nav-btn" data-tab="about" onclick="switchTab('about')">
+    <span class="nav-icon">👑</span>
+    <span class="nav-label" data-i18n="tab_about">О нас</span>
+  </button>
+</nav>
+
+<!-- App JS -->
+<script src="/static/app.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,71 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+wheels/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===== Virtual Environments =====
+.venv/
+venv/
+ENV/
+env/
+.env.bak
+
+# ===== Environment / Secrets — НИКОГДА не коммитить! =====
+.env
+*.env.local
+*.env.production
+secrets.json
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== SQLite DB =====
+*.db
+*.db-shm
+*.db-wal
+*.db*
+*.sqlite
+*.sqlite3
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Uploads / temp files =====
+uploads/
+tmp/
+temp/
+*.pdf
+
+# ===== Frontend & Node =====
+node_modules/
+.npm
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
