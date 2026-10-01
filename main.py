@@ -552,6 +552,43 @@ async def delete_card_history_item(card_id: int):
     return {"status": "ok", "deleted_id": card_id}
 
 
+@app.get("/api/cards/{card_id}/photo")
+async def get_card_photo(card_id: int):
+    """Serve card studio photo on-demand with high-performance caching."""
+    from services.database import get_db_connection
+    import base64
+    from fastapi.responses import RedirectResponse
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT studio_photo_url FROM generated_cards WHERE id = ?", (card_id,))
+        row = cursor.fetchone()
+        if not row or not row["studio_photo_url"]:
+            raise HTTPException(status_code=404, detail="Photo not found")
+
+        photo_val = row["studio_photo_url"]
+        if photo_val.startswith("data:"):
+            try:
+                header, b64_data = photo_val.split(",", 1)
+                mime = "image/jpeg"
+                if "image/png" in header:
+                    mime = "image/png"
+                elif "image/webp" in header:
+                    mime = "image/webp"
+                raw_bytes = base64.b64decode(b64_data)
+                return Response(
+                    content=raw_bytes,
+                    media_type=mime,
+                    headers={"Cache-Control": "public, max-age=604800, immutable"},
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Failed to decode photo: {exc}")
+        elif photo_val.startswith("http"):
+            return RedirectResponse(url=photo_val)
+        else:
+            raise HTTPException(status_code=404, detail="Invalid photo URL")
+
+
 @app.delete("/api/history")
 async def clear_all_cards_history():
     """Clear all card history."""
@@ -862,6 +899,14 @@ async def get_uzum_order_label_png(order_id: int, size: str = "LARGE"):
     if not png_bytes:
         raise HTTPException(status_code=404, detail="Etiketka rasmini yaratib bo'lmadi")
     return Response(content=png_bytes, media_type="image/png")
+
+
+@app.get("/api/uzum/orders/{order_id}/label.svg")
+async def get_uzum_order_label_svg(order_id: int, size: str = "LARGE"):
+    """Return shipping label as a pure vector SVG (58x40 or 43x25 mm)."""
+    from services.uzum_service import uzum_service
+    svg_content = uzum_service.generate_thermal_label_svg(order_id, size=size)
+    return Response(content=svg_content, media_type="image/svg+xml")
 
 
 @app.get("/api/uzum/stocks")

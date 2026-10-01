@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   Layers, 
   Laptop, 
-  Globe2 
+  Globe2,
+  GraduationCap
 } from 'lucide-react';
 
 export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
@@ -141,6 +142,16 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
         <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
           {t.about_team_desc}
         </p>
+
+        <div className="flex items-center flex-wrap gap-1.5 pt-1">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-teal-300 border border-brand-200 dark:border-brand-800">
+            <GraduationCap className="w-3.5 h-3.5 mr-1 text-brand-600 dark:text-teal-400" />
+            {lang === 'uz' ? "TDYU • Toshkent Davlat Yuridik Universiteti" : "ТГЮУ • Ташкентский Государственный Юридический Университет"}
+          </span>
+          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+            {lang === 'uz' ? "Biznes huquqi va sud faoliyati (2-kurs)" : "Бизнес-право и судебная защита (2 курс)"}
+          </span>
+        </div>
       </div>
 
       {/* Legal Disclaimer & Limitation of Liability Card */}

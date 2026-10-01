@@ -98,6 +98,11 @@ def init_db(force: bool = False) -> None:
             except Exception:
                 pass
 
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN agreed_terms INTEGER DEFAULT 0")
+            except Exception:
+                pass
+
             for table in ("generated_cards", "usage_logs", "bot_subscribers"):
                 try:
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(user_id)")
@@ -444,7 +449,8 @@ def get_history(
                     "price_tag": row["price_tag"],
                     "hashtags": ht,
                     "marketing_tip": row["marketing_tip"],
-                    "studio_photo_url": row["studio_photo_url"],
+                    "has_studio_photo": bool(row["studio_photo_url"]),
+                    "studio_photo_url": f"/api/cards/{row['id']}/photo" if (row["studio_photo_url"] and row["studio_photo_url"].startswith("data:")) else row["studio_photo_url"],
                     "photoshoot_style": row["photoshoot_style"],
                     "content_tone": row["content_tone"],
                     "content_format": row["content_format"],
@@ -732,6 +738,84 @@ def set_user_admin(tg_id: int, is_admin: bool = True) -> bool:
     except Exception as exc:
         logger.error("Failed to set user admin for %s: %s", tg_id, exc)
         return False
+
+
+def set_user_terms_agreed(tg_id: int, agreed: bool = True, lang: Optional[str] = None) -> bool:
+    """Record user consent to terms of service and update their language if provided."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            if lang:
+                cursor.execute(
+                    "UPDATE users SET agreed_terms = ?, lang = ?, last_seen_at = CURRENT_TIMESTAMP WHERE tg_id = ?",
+                    (1 if agreed else 0, lang, tg_id),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE users SET agreed_terms = ?, last_seen_at = CURRENT_TIMESTAMP WHERE tg_id = ?",
+                    (1 if agreed else 0, tg_id),
+                )
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception as exc:
+        logger.error("Failed to set agreed terms for tg_id %s: %s", tg_id, exc)
+        return False
+
+
+def get_user_terms_agreed(tg_id: int) -> bool:
+    """Check if user has agreed to terms of service."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT agreed_terms FROM users WHERE tg_id = ?", (tg_id,))
+            row = cursor.fetchone()
+            if not row or row["agreed_terms"] is None:
+                return False
+            return bool(row["agreed_terms"])
+    except Exception as exc:
+        logger.error("Failed to get terms agreed for tg_id %s: %s", tg_id, exc)
+        return False
+
+
+def set_user_lang(tg_id: int, lang: str) -> bool:
+    """Update language preference for user."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET lang = ?, last_seen_at = CURRENT_TIMESTAMP WHERE tg_id = ?",
+                (lang, tg_id),
+            )
+            # Also sync with bot_subscribers if present
+            cursor.execute(
+                "UPDATE bot_subscribers SET lang = ? WHERE chat_id = ?",
+                (lang, tg_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception as exc:
+        logger.error("Failed to set lang for tg_id %s: %s", tg_id, exc)
+        return False
+
+
+def get_user_lang(tg_id: int, default: str = "uz") -> str:
+    """Get preferred language for user."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT lang FROM users WHERE tg_id = ?", (tg_id,))
+            row = cursor.fetchone()
+            if row and row["lang"]:
+                return str(row["lang"])
+            # Fallback to bot_subscribers
+            cursor.execute("SELECT lang FROM bot_subscribers WHERE chat_id = ?", (tg_id,))
+            sub_row = cursor.fetchone()
+            if sub_row and sub_row["lang"]:
+                return str(sub_row["lang"])
+            return default
+    except Exception as exc:
+        logger.error("Failed to get lang for tg_id %s: %s", tg_id, exc)
+        return default
 
 
 def update_user_profile(
@@ -1068,7 +1152,8 @@ def get_admin_cards(
                     "price_tag": row["price_tag"],
                     "hashtags": ht,
                     "marketing_tip": row["marketing_tip"],
-                    "studio_photo_url": row["studio_photo_url"],
+                    "has_studio_photo": bool(row["studio_photo_url"]),
+                    "studio_photo_url": f"/api/cards/{row['id']}/photo" if (row["studio_photo_url"] and row["studio_photo_url"].startswith("data:")) else row["studio_photo_url"],
                     "photoshoot_style": row["photoshoot_style"],
                     "cost_price": row["cost_price"],
                     "desired_price": row["desired_price"],

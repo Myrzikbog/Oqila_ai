@@ -23,7 +23,19 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
-from services.database import log_event, save_subscriber, unsubscribe_subscriber
+from services.database import (
+    get_all_users,
+    get_user_by_tg_id,
+    get_user_lang,
+    get_user_terms_agreed,
+    log_event,
+    save_subscriber,
+    set_user_admin,
+    set_user_lang,
+    set_user_terms_agreed,
+    unsubscribe_subscriber,
+    upsert_user,
+)
 from services.legal_calc import calculate
 
 logger = logging.getLogger("oqila_telegram")
@@ -73,6 +85,74 @@ TAX_CALENDAR_TEXT_RU = (
     "⚠️ <b>При годовом обороте свыше 1 млрд сум:</b>\n"
     "Возникает обязательство перехода на НДС (12%) и налог на прибыль."
 )
+
+LANG_SELECTION_TEXT = (
+    "🇺🇿 <b>Oqila AI platformasiga xush kelibsiz!</b>\n"
+    "Iltimos, muloqot tilini tanlang:\n\n"
+    "🇷🇺 <b>Добро пожаловать в платформу Oqila AI!</b>\n"
+    "Пожалуйста, выберите язык общения:"
+)
+
+TERMS_TEXT_UZ = (
+    "📋 <b>Foydalanuvchi shartnomasi va javobgarlikdan cheklanish</b>\n\n"
+    "«Oqila AI» xizmatidan foydalanishni boshlashdan oldin quyidagi shartlar bilan tanishib chiqing:\n\n"
+    "1. <b>Tavsiyaviy xarakter:</b> «Oqila AI» sun'iy intellekt texnologiyalariga asoslangan bo'lib, "
+    "taqdim etiladigan barcha ma'lumotlar, narx hisob-kitoblari, soliq konsultatsiyalari va marketing "
+    "tavsiyalari faqat <i>tavsiyaviy va axborot xarakteriga</i> ega.\n\n"
+    "2. <b>Moliyaviy va huquqiy xavflar:</b> Xizmat yaratuvchilari va ma'muriyati foydalanuvchining tijoriy faoliyati, "
+    "daromadlari yoki zararlari, soliq organlari bilan munosabatlari, jarimalar, marketpleyslar (jumladan Uzum Market) "
+    "qoidalari o'zgarishi yoki narx belgilashdagi xatoliklar uchun <i>hech qanday moddiy yoki yuridik javobgarlikni o'z zimmasiga olmaydi</i>.\n\n"
+    "3. <b>Foydalanuvchi mas'uliyati:</b> O'z biznesingiz, buxgalteriya hisoboti, to'lanadigan soliqlar aniqligi hamda "
+    "tovarlar sifati va savdo qonuniyligi uchun to'liq javobgarlik o'zingizda qoladi.\n\n"
+    "4. <b>Ma'lumotlar xavfsizligi:</b> Tizim foydalanuvchi tajribasini yaxshilash maqsadida kiritilgan ma'lumotlarni "
+    "xavfsiz qayta ishlaydi.\n\n"
+    "👇 <i>Davom etish uchun quyidagi tugma orqali shartlarga rozilik bildiring:</i>"
+)
+
+TERMS_TEXT_RU = (
+    "📋 <b>Пользовательское соглашение и отказ от ответственности</b>\n\n"
+    "Перед началом использования сервиса «Oqila AI», пожалуйста, ознакомьтесь с условиями:\n\n"
+    "1. <b>Рекомендательный характер:</b> Сервис «Oqila AI» работает на базе искусственного интеллекта. "
+    "Все расчёты цен, наценок, налогов, маркетинговые тексты и юридические ответы носят <i>исключительно "
+    "ознакомительный и рекомендательный характер</i>.\n\n"
+    "2. <b>Отказ от ответственности:</b> Администрация и создатели платформы <i>не несут никакой финансовой или "
+    "юридической ответственности</i> за коммерческие риски, недополученную прибыль, возможные убытки, налоговые штрафы "
+    "или изменения регламентов сторонних маркетплейсов (включая Uzum Market).\n\n"
+    "3. <b>Ответственность пользователя:</b> Пользователь самостоятельно несёт полную ответственность за ведение своего "
+    "бизнеса, правильность налоговой и бухгалтерской отчётности, ценообразование и законность реализуемых товаров.\n\n"
+    "4. <b>Конфиденциальность:</b> Сервис обрабатывает пользовательские данные в соответствии с установленными нормами "
+    "безопасности исключительно для работы функционала.\n\n"
+    "👇 <i>Для продолжения подтвердите своё согласие с условиями:</i>"
+)
+
+WELCOME_TEXT_UZ = (
+    "👋 <b>Assalomu alaykum, {username}!</b>\n\n"
+    "🌿 <b>«Oqila AI»</b> — O'zbekiston tadbirkor ayollari va hunarmandlari uchun "
+    "sun'iy intellektga asoslangan raqamli biznes-assistent!\n\n"
+    "✨ <b>Nimalar qila olaman:</b>\n"
+    "• 📸 <b>Mahsulot qadoqlash:</b> Menga mahsulot rasmini yuboring — AI studiya fotosi va tayyor marketing postini yaratadi!\n"
+    "• 💰 <b>Foyda va soliq hisobi:</b> /tax 380000 120000 buyrug'i orqali sof foydani hisoblang.\n"
+    "• 🛍️ <b>Uzum Market:</b> /uzum orqali do'konlar va buyurtmalarni boshqaring.\n"
+    "• 💡 <b>/tips:</b> Biznesni rivojlantirish bo'yicha kunlik tavsiyalar.\n"
+    "• 📅 <b>/calendar:</b> O'zR soliq va hisobot muddatlari.\n"
+    "• 🤖 <b>OqilaLegal:</b> Huquq va soliq bo'yicha har qanday savolingizga javob beraman.\n\n"
+    "👇 <b>To'liq interaktiv ilovani ochish:</b>"
+)
+
+WELCOME_TEXT_RU = (
+    "👋 <b>Здравствуйте, {username}!</b>\n\n"
+    "🌿 <b>«Oqila AI»</b> — ваш умный цифровой бизнес-ассистент на базе ИИ для "
+    "предпринимательниц и мастериц Узбекистана!\n\n"
+    "✨ <b>Что я умею:</b>\n"
+    "• 📸 <b>Упаковка товара:</b> Отправьте фото изделия в этот чат — ИИ создаст продающее студийное фото и готовый маркетинговый пост!\n"
+    "• 💰 <b>Расчёт прибыли и налогов:</b> Команда /tax 380000 120000 рассчитает маржу, комиссии Uzum и чистый доход.\n"
+    "• 🛍️ <b>Uzum Market:</b> Команда /uzum покажет статус магазинов, заказы и выплаты.\n"
+    "• 💡 <b>/tips:</b> Ежедневные практические советы по развитию продаж.\n"
+    "• 📅 <b>/calendar:</b> Налоговый календарь и сроки отчётов в РУз (2026).\n"
+    "• 🤖 <b>OqilaLegal:</b> ИИ-консультант по налогам и правовым вопросам.\n\n"
+    "👇 <b>Открыть интерактивное приложение:</b>"
+)
+
 
 
 class TelegramService:
@@ -336,6 +416,7 @@ class TelegramService:
             return False
         commands = [
             {"command": "start", "description": "🚀 Oqila AI ilovasi (Mini App)"},
+            {"command": "lang", "description": "🌐 Tilni tanlash / Выбор языка"},
             {"command": "demo", "description": "📸 Namuna mahsulot qadoqlash"},
             {"command": "tax", "description": "💰 Soliq & marja hisobi (masalan: /tax 350000 120000)"},
             {"command": "uzum", "description": "🛍️ Uzum Market: do'konlar, buyurtmalar va qoldiqlar"},
@@ -408,21 +489,100 @@ class TelegramService:
             cb_id = cb.get("id")
             cb_data = cb.get("data")
             chat_id = cb.get("message", {}).get("chat", {}).get("id")
+            cb_user_id = cb.get("from", {}).get("id") or chat_id
             if cb_id:
                 await self.answer_callback_query(cb_id)
-            if cb_data == "help" and chat_id:
-                help_text = (
-                    "ℹ️ <b>Oqila AI Bot Qo'llanmasi</b>\n\n"
-                    "• 🚀 <b>Mini App:</b> Pastdagi tugmani bosib to'liq AI Studiya va kalkulyatorni oching.\n"
-                    "• 📸 <b>Rasm yuboring:</b> Mahsulot rasmini shu chatga yuborsangiz, AI uni tahlil qilib sotiq matnini tayyorlaydi.\n"
-                    "• 💰 <b>/tax 380000 120000:</b> Tezkor soliq va Uzum sof foydasi hisobi.\n"
-                    "• 🛍️ <b>/uzum:</b> Uzum Market do'konlari, yangi buyurtmalar va qoldiqlar.\n"
-                    "• 💡 <b>/tips:</b> Ayol tadbirkorlar uchun foydali maslahat.\n"
-                    "• 📅 <b>/calendar:</b> O'zR soliq muddatlari va hisobotlar."
+
+            if cb_data == "cmd_change_lang" and chat_id:
+                await self.send_message(
+                    chat_id,
+                    LANG_SELECTION_TEXT,
+                    reply_markup=self._build_language_keyboard(),
                 )
+            elif cb_data in ("set_lang_uz", "set_lang_ru") and chat_id:
+                selected_lang = "uz" if cb_data == "set_lang_uz" else "ru"
+                set_user_lang(cb_user_id, selected_lang)
+                terms_ok = get_user_terms_agreed(cb_user_id)
+                if not terms_ok:
+                    terms_text = TERMS_TEXT_UZ if selected_lang == "uz" else TERMS_TEXT_RU
+                    await self.send_message(
+                        chat_id,
+                        terms_text,
+                        reply_markup=self._build_terms_keyboard(lang=selected_lang),
+                    )
+                else:
+                    confirm_text = (
+                        "🇺🇿 <b>Muloqot tili o'zbek tiliga o'zgartirildi!</b>"
+                        if selected_lang == "uz"
+                        else "🇷🇺 <b>Язык общения успешно изменён на русский!</b>"
+                    )
+                    await self.send_message(chat_id, confirm_text)
+                    from_user = cb.get("from", {})
+                    uname = html.escape(from_user.get("first_name") or from_user.get("username") or "Tadbirkor")
+                    w_text = (
+                        WELCOME_TEXT_UZ.format(username=uname)
+                        if selected_lang == "uz"
+                        else WELCOME_TEXT_RU.format(username=uname)
+                    )
+                    await self.send_message(
+                        chat_id,
+                        w_text,
+                        reply_markup=self._build_main_keyboard(app_url, lang=selected_lang),
+                    )
+            elif cb_data in ("accept_terms_uz", "accept_terms_ru") and chat_id:
+                agreed_lang = "uz" if cb_data == "accept_terms_uz" else "ru"
+                set_user_terms_agreed(cb_user_id, agreed=True, lang=agreed_lang)
+                from_user = cb.get("from", {})
+                uname = html.escape(from_user.get("first_name") or from_user.get("username") or "Tadbirkor")
+                accepted_msg = (
+                    "✅ <b>Foydalanuvchi shartnomasi qabul qilindi!</b>\n\n"
+                    "«Oqila AI»ga xush kelibsiz. Quyidagi tugma orqali ilovani ochishingiz mumkin:"
+                    if agreed_lang == "uz"
+                    else "✅ <b>Пользовательское соглашение успешно принято!</b>\n\n"
+                    "Добро пожаловать в «Oqila AI». Вы можете открыть приложение кнопкой ниже:"
+                )
+                await self.send_message(chat_id, accepted_msg)
+                w_text = (
+                    WELCOME_TEXT_UZ.format(username=uname)
+                    if agreed_lang == "uz"
+                    else WELCOME_TEXT_RU.format(username=uname)
+                )
+                await self.send_message(
+                    chat_id,
+                    w_text,
+                    reply_markup=self._build_main_keyboard(app_url, lang=agreed_lang),
+                )
+            elif cb_data == "demo" and chat_id:
+                user_lang = get_user_lang(cb_user_id, "uz")
+                await self._handle_demo_command(chat_id, app_url, lang=user_lang)
+            elif cb_data == "help" and chat_id:
+                user_lang = get_user_lang(cb_user_id, "uz")
+                if user_lang == "ru":
+                    help_text = (
+                        "ℹ️ <b>Справка по боту Oqila AI</b>\n\n"
+                        "• 🚀 <b>Mini App:</b> Откройте полную AI-студию и калькулятор кнопкой ниже.\n"
+                        "• 📸 <b>Отправьте фото:</b> ИИ создаст продающее студийное фото и готовый маркетинговый пост.\n"
+                        "• 💰 <b>/tax 380000 120000:</b> Быстрый расчёт налогов и чистой прибыли на Uzum Market.\n"
+                        "• 🛍️ <b>/uzum:</b> Управление магазинами, заказами и остатками.\n"
+                        "• 💡 <b>/tips:</b> Полезные советы для предпринимательниц.\n"
+                        "• 📅 <b>/calendar:</b> Сроки налоговых платежей и отчётов.\n"
+                        "• 🌐 <b>/lang:</b> Выбор языка (O'zbekcha / Русский)."
+                    )
+                else:
+                    help_text = (
+                        "ℹ️ <b>Oqila AI Bot Qo'llanmasi</b>\n\n"
+                        "• 🚀 <b>Mini App:</b> Pastdagi tugmani bosib to'liq AI Studiya va kalkulyatorni oching.\n"
+                        "• 📸 <b>Rasm yuboring:</b> Mahsulot rasmini shu chatga yuborsangiz, AI uni tahlil qilib sotiq matnini tayyorlaydi.\n"
+                        "• 💰 <b>/tax 380000 120000:</b> Tezkor soliq va Uzum sof foydasi hisobi.\n"
+                        "• 🛍️ <b>/uzum:</b> Uzum Market do'konlari, yangi buyurtmalar va qoldiqlar.\n"
+                        "• 💡 <b>/tips:</b> Ayol tadbirkorlar uchun foydali maslahat.\n"
+                        "• 📅 <b>/calendar:</b> O'zR soliq muddatlari va hisobotlar.\n"
+                        "• 🌐 <b>/lang:</b> Tilni tanlash (O'zbekcha / Русский)."
+                    )
                 await self.send_message(chat_id, help_text)
             elif cb_data == "tips" and chat_id:
-                tip = random.choice(DAILY_TIPS_UZ)
+                user_lang = get_user_lang(cb_user_id, "uz")
+                tip = random.choice(DAILY_TIPS_RU if user_lang == "ru" else DAILY_TIPS_UZ)
                 await self.send_message(chat_id, tip)
             elif cb_data and cb_data.startswith("uzum_confirm_"):
                 try:
@@ -555,40 +715,64 @@ class TelegramService:
         text = msg.get("text", "").strip()
 
         # 4. Command Handlers
+        user_tg_id = user.get("id") or chat_id
+        # Ensure user exists in database
+        upsert_user(
+            tg_id=user_tg_id,
+            tg_username=user.get("username"),
+            tg_first_name=user.get("first_name"),
+        )
+        user_lang = get_user_lang(user_tg_id, default="uz")
+        user_agreed = get_user_terms_agreed(user_tg_id)
+
+        if text.startswith("/lang"):
+            await self.send_message(
+                chat_id,
+                LANG_SELECTION_TEXT,
+                reply_markup=self._build_language_keyboard(),
+            )
+            return
+
         if text.startswith("/start"):
             log_event(
                 event_type="telegram_start",
-                lang="uz",
+                lang=user_lang,
                 is_mock=False,
-                details={"user_id": user.get("id"), "username": username},
+                details={"user_id": user_tg_id, "username": username, "agreed": user_agreed},
             )
+
+            # If user has not accepted terms yet, start onboarding by asking for language
+            if not user_agreed:
+                await self.send_message(
+                    chat_id,
+                    LANG_SELECTION_TEXT,
+                    reply_markup=self._build_language_keyboard(),
+                )
+                return
+
             welcome_text = (
-                f"👋 <b>Assalomu alaykum, {username}!</b>\n\n"
-                "🌿 <b>«Oqila AI»</b> — O'zbekiston tadbirkor ayollari va hunarmandlari uchun "
-                "sun'iy intellektga asoslangan raqamli biznes-assistent!\n\n"
-                "✨ <b>Nimalar qila olaman:</b>\n"
-                "• 📸 <b>Mahsulot qadoqlash:</b> Menga mahsulot rasmini yuboring — AI studiya fotosi va tayyor marketing postini yaratadi!\n"
-                "• 💰 <b>Foyda va soliq hisobi:</b> /tax 380000 120000 buyrug'i orqali sof foydani hisoblang.\n"
-                "• 💡 <b>/tips:</b> Biznesni rivojlantirish bo'yicha kunlik tavsiyalar.\n"
-                "• 📅 <b>/calendar:</b> O'zR soliq va hisobot muddatlari.\n"
-                "• 🤖 <b>OqilaLegal:</b> Huquq va soliq bo'yicha har qanday savolingizga javob beraman.\n\n"
-                "👇 <b>To'liq interaktiv ilovani ochish:</b>"
+                WELCOME_TEXT_UZ.format(username=username)
+                if user_lang == "uz"
+                else WELCOME_TEXT_RU.format(username=username)
             )
-            keyboard = self._build_main_keyboard(app_url)
+            keyboard = self._build_main_keyboard(app_url, lang=user_lang)
             await self.send_message(chat_id, welcome_text, reply_markup=keyboard)
 
         elif text.startswith("/demo"):
-            await self._handle_demo_command(chat_id, app_url)
+            await self._handle_demo_command(chat_id, app_url, lang=user_lang)
 
         elif text.startswith("/tax") or text.startswith("/price"):
-            await self._handle_tax_command(text, chat_id, app_url)
+            await self._handle_tax_command(text, chat_id, app_url, lang=user_lang)
 
         elif text.startswith("/tips"):
-            tip = random.choice(DAILY_TIPS_UZ)
+            tip = random.choice(DAILY_TIPS_RU if user_lang == "ru" else DAILY_TIPS_UZ)
+            again_btn = "🔄 Yana maslahat olish" if user_lang == "uz" else "🔄 Ещё совет"
+            app_btn = "🚀 Mini App'ni ochish" if user_lang == "uz" else "🚀 Открыть Mini App"
+            url_with_lang = f"{app_url}{'&' if '?' in app_url else '?'}lang={user_lang}"
             keyboard = {
                 "inline_keyboard": [
-                    [{"text": "🔄 Yana maslahat olish", "callback_data": "tips"}],
-                    [{"text": "🚀 Mini App'ni ochish", "web_app": {"url": app_url}}] if app_url.startswith("https://") else []
+                    [{"text": again_btn, "callback_data": "tips"}],
+                    [{"text": app_btn, "web_app": {"url": url_with_lang}}] if app_url.startswith("https://") else []
                 ]
             }
             # filter empty rows
@@ -596,7 +780,7 @@ class TelegramService:
             await self.send_message(chat_id, tip, reply_markup=keyboard)
 
         elif text.startswith("/calendar"):
-            await self.send_message(chat_id, TAX_CALENDAR_TEXT_UZ)
+            await self.send_message(chat_id, TAX_CALENDAR_TEXT_RU if user_lang == "ru" else TAX_CALENDAR_TEXT_UZ)
 
         elif text.startswith("/uzum"):
             from services.database import get_uzum_shops, get_uzum_orders, get_uzum_finance_summary
@@ -606,76 +790,147 @@ class TelegramService:
 
             shops_str = ""
             for s in shops:
-                shops_str += f"• <b>{s['title']}</b> (Kutilayotgan buyurtmalar: {s.get('pending_orders_count', 0)})\n"
+                pending_count = s.get('pending_orders_count', 0)
+                if user_lang == "ru":
+                    shops_str += f"• <b>{s['title']}</b> (Заказов в ожидании: {pending_count})\n"
+                else:
+                    shops_str += f"• <b>{s['title']}</b> (Kutilayotgan buyurtmalar: {pending_count})\n"
             if not shops_str:
-                shops_str = "• <i>Hozircha do'konlar ulanmagan (Oqila ilovasida Uzum API kalitini kiriting).</i>\n"
+                shops_str = (
+                    "• <i>Магазины пока не подключены (введите API ключ Uzum в приложении Oqila).</i>\n"
+                    if user_lang == "ru"
+                    else "• <i>Hozircha do'konlar ulanmagan (Oqila ilovasida Uzum API kalitini kiriting).</i>\n"
+                )
 
-            uzum_status_text = (
-                "🛍️ <b>Uzum Market — Do'konlar va Buyurtmalar:</b>\n\n"
-                f"🏢 <b>Do'konlaringiz:</b>\n{shops_str}\n"
-                f"⏳ <b>Tasdiqlash kutilayotgan buyurtmalar:</b> {len(orders)} ta\n"
-                f"💰 <b>Jami tushum (barcha do'konlar):</b> {fin.get('gross_revenue', 0):,.0f} so'm\n"
-                f"💳 <b>Kutilayotgan sof to'lov:</b> {fin.get('net_payout', 0):,.0f} so'm\n\n"
-                "👇 <i>Buyurtmalarni tasdiqlash va boshqarish uchun ilovani oching:</i>"
-            )
+            if user_lang == "ru":
+                uzum_status_text = (
+                    "🛍️ <b>Uzum Market — Магазины и Заказы:</b>\n\n"
+                    f"🏢 <b>Ваши магазины:</b>\n{shops_str}\n"
+                    f"⏳ <b>Заказы, ожидающие подтверждения:</b> {len(orders)} шт\n"
+                    f"💰 <b>Общая выручка:</b> {fin.get('gross_revenue', 0):,.0f} сум\n"
+                    f"💳 <b>Ожидаемая чистая выплата:</b> {fin.get('net_payout', 0):,.0f} сум\n\n"
+                    "👇 <i>Для подтверждения заказов откройте приложение:</i>"
+                )
+                open_btn_text = "🛍️ Открыть раздел Uzum"
+            else:
+                uzum_status_text = (
+                    "🛍️ <b>Uzum Market — Do'konlar va Buyurtmalar:</b>\n\n"
+                    f"🏢 <b>Do'konlaringiz:</b>\n{shops_str}\n"
+                    f"⏳ <b>Tasdiqlash kutilayotgan buyurtmalar:</b> {len(orders)} ta\n"
+                    f"💰 <b>Jami tushum (barcha do'konlar):</b> {fin.get('gross_revenue', 0):,.0f} so'm\n"
+                    f"💳 <b>Kutilayotgan sof to'lov:</b> {fin.get('net_payout', 0):,.0f} so'm\n\n"
+                    "👇 <i>Buyurtmalarni tasdiqlash va boshqarish uchun ilovani oching:</i>"
+                )
+                open_btn_text = "🛍️ Uzum bo'limini ochish"
+
+            url_with_lang = f"{app_url}{'&' if '?' in app_url else '?'}tab=uzum&lang={user_lang}"
             keyboard = {
                 "inline_keyboard": [
-                    [{"text": "🛍️ Uzum bo'limini ochish", "web_app": {"url": f"{app_url}?tab=uzum"}}] if app_url.startswith("https://") else []
+                    [{"text": open_btn_text, "web_app": {"url": url_with_lang}}] if app_url.startswith("https://") else []
                 ]
             }
             keyboard["inline_keyboard"] = [row for row in keyboard["inline_keyboard"] if row]
             await self.send_message(chat_id, uzum_status_text, reply_markup=keyboard)
 
         elif text.startswith("/subscribe"):
-            success = save_subscriber(chat_id, username=username, lang="uz")
+            success = save_subscriber(chat_id, username=username, lang=user_lang)
             if success:
-                msg_sub = (
-                    "🔔 <b>Tabriklaymiz! Siz Oqila AI eslatmalariga obuna bo'ldingiz.</b>\n\n"
-                    "Endi siz har oyning 15-sanasigacha soliq to'lovlari bo'yicha eslatmalar "
-                    "hamda biznesingizni o'stiruvchi foydali tavsiyalarni olasiz!\n\n"
-                    "<i>Obunani bekor qilish uchun: /unsubscribe</i>"
-                )
+                if user_lang == "ru":
+                    msg_sub = (
+                        "🔔 <b>Поздравляем! Вы подписались на напоминания Oqila AI.</b>\n\n"
+                        "Теперь вы будете получать напоминания о налогах до 15-го числа каждого месяца "
+                        "и полезные советы по развитию вашего бизнеса!\n\n"
+                        "<i>Для отмены подписки: /unsubscribe</i>"
+                    )
+                else:
+                    msg_sub = (
+                        "🔔 <b>Tabriklaymiz! Siz Oqila AI eslatmalariga obuna bo'ldingiz.</b>\n\n"
+                        "Endi siz har oyning 15-sanasigacha soliq to'lovlari bo'yicha eslatmalar "
+                        "hamda biznesingizni o'stiruvchi foydali tavsiyalarni olasiz!\n\n"
+                        "<i>Obunani bekor qilish uchun: /unsubscribe</i>"
+                    )
             else:
-                msg_sub = "⚠️ Obunani rasmiylashtirishda xatolik yuz berdi. Iltimos qayta urinib ko'ring."
+                msg_sub = (
+                    "⚠️ Ошибка при оформлении подписки. Пожалуйста, попробуйте снова."
+                    if user_lang == "ru"
+                    else "⚠️ Obunani rasmiylashtirishda xatolik yuz berdi. Iltimos qayta urinib ko'ring."
+                )
             await self.send_message(chat_id, msg_sub)
 
         elif text.startswith("/unsubscribe"):
             success = unsubscribe_subscriber(chat_id)
             if success:
-                msg_unsub = (
-                    "🔕 <b>Obunangiz bekor qilindi.</b>\n\n"
-                    "Siz endi botdan avtomatik eslatmalarni olmaysiz. "
-                    "Qayta obuna bo'lish uchun istalgan vaqtda /subscribe buyrug'ini yuborishingiz mumkin."
-                )
+                if user_lang == "ru":
+                    msg_unsub = (
+                        "🔕 <b>Подписка отменена.</b>\n\n"
+                        "Вы больше не будете получать автоматические напоминания от бота. "
+                        "Чтобы подписаться снова, отправьте /subscribe в любое время."
+                    )
+                else:
+                    msg_unsub = (
+                        "🔕 <b>Obunangiz bekor qilindi.</b>\n\n"
+                        "Siz endi botdan avtomatik eslatmalarni olmaysiz. "
+                        "Qayta obuna bo'lish uchun istalgan vaqtda /subscribe buyrug'ini yuborishingiz mumkin."
+                    )
             else:
-                msg_unsub = "ℹ️ Siz avval obuna bo'lmagansiz yoki obuna allaqachon bekor qilingan."
+                msg_unsub = (
+                    "ℹ️ Вы не были подписаны или подписка уже отменена."
+                    if user_lang == "ru"
+                    else "ℹ️ Siz avval obuna bo'lmagansiz yoki obuna allaqachon bekor qilingan."
+                )
+            await self.send_message(chat_id, msg_unsub)
+
         elif text.startswith("/admin"):
             user_id = user.get("id")
             await self._handle_admin_command(chat_id, app_url, text, user_id=user_id)
 
         elif text.startswith("/help"):
-            help_text = (
-                "ℹ️ <b>Oqila AI Bot Qo'llanmasi</b>\n\n"
-                "• 📸 <b>Rasm yuborish:</b> Mahsulot rasmini chatga yuboring — AI uni tahlil qilib, tavsif va narx chiqaradi.\n"
-                "• 💰 <b>/tax 350000 120000:</b> Birinchi son sotish narxi, ikkinchi son tannarxi — soliq va Uzum sof foydasi.\n"
-                "• 📸 <b>/demo:</b> Tayyor mahsulot qadoqlash namunasini ko'rish.\n"
-                "• 💡 <b>/tips:</b> Kunlik marketing va savdo maslahatlari.\n"
-                "• 📅 <b>/calendar:</b> O'zR soliq to'lovlari taqvimi.\n"
-                "• 🔔 <b>/subscribe:</b> Soliq eslatmalariga obuna bo'lish.\n\n"
-                "Ilovadan to'liq foydalanish uchun <b>«Oqila AI ilovasini ochish»</b> tugmasini bosing."
-            )
+            if user_lang == "ru":
+                help_text = (
+                    "ℹ️ <b>Справка по боту Oqila AI</b>\n\n"
+                    "• 📸 <b>Отправка фото:</b> Отправьте фото изделия в этот чат — ИИ проанализирует его и составит описание с ценой.\n"
+                    "• 💰 <b>/tax 350000 120000:</b> Первое число — цена продажи, второе — себестоимость (расчёт налога и чистой прибыли).\n"
+                    "• 🛍️ <b>/uzum:</b> Управление магазинами, заказами и печать этикеток.\n"
+                    "• 📸 <b>/demo:</b> Посмотреть пример готовой карточки товара.\n"
+                    "• 💡 <b>/tips:</b> Практические советы по продажам и маркетингу.\n"
+                    "• 📅 <b>/calendar:</b> Налоговый календарь Узбекистана 2026.\n"
+                    "• 🌐 <b>/lang:</b> Смена языка бота (O'zbekcha / Русский).\n"
+                    "• 🔔 <b>/subscribe:</b> Подписка на налоговые напоминания.\n\n"
+                    "Для полноценной работы нажмите кнопку <b>«Открыть приложение Oqila AI»</b>."
+                )
+            else:
+                help_text = (
+                    "ℹ️ <b>Oqila AI Bot Qo'llanmasi</b>\n\n"
+                    "• 📸 <b>Rasm yuborish:</b> Mahsulot rasmini chatga yuboring — AI uni tahlil qilib, tavsif va narx chiqaradi.\n"
+                    "• 💰 <b>/tax 350000 120000:</b> Birinchi son sotish narxi, ikkinchi son tannarxi — soliq va Uzum sof foydasi.\n"
+                    "• 🛍️ <b>/uzum:</b> Uzum Market do'konlari, buyurtmalar va etiketkalarni chop etish.\n"
+                    "• 📸 <b>/demo:</b> Tayyor mahsulot qadoqlash namunasini ko'rish.\n"
+                    "• 💡 <b>/tips:</b> Kunlik marketing va savdo maslahatlari.\n"
+                    "• 📅 <b>/calendar:</b> O'zR soliq to'lovlari taqvimi.\n"
+                    "• 🌐 <b>/lang:</b> Bot tilini o'zgartirish (O'zbekcha / Русский).\n"
+                    "• 🔔 <b>/subscribe:</b> Soliq eslatmalariga obuna bo'lish.\n\n"
+                    "Ilovadan to'liq foydalanish uchun <b>«Oqila AI ilovasini ochish»</b> tugmasini bosing."
+                )
             await self.send_message(chat_id, help_text)
 
         else:
             # Handle user question with AI Legal & Business guidance
             from services.ai_service import ai_service
-            answer = await ai_service.legal_qa(text, lang="uz")
-            reply = f"🤖 <b>OqilaLegal maslahatchisi:</b>\n\n{answer}\n\n<i>To'liq studiya va kalkulyatordan foydalanish uchun Mini App'ni oching.</i>"
+            answer = await ai_service.legal_qa(text, lang=user_lang)
+            consultant_title = "🤖 <b>OqilaLegal maslahatchisi:</b>" if user_lang == "uz" else "🤖 <b>Консультант OqilaLegal:</b>"
+            footer_note = (
+                "<i>To'liq studiya va kalkulyatordan foydalanish uchun Mini App'ni oching.</i>"
+                if user_lang == "uz"
+                else "<i>Откройте Mini App для доступа к фотостудии и калькулятору.</i>"
+            )
+            reply = f"{consultant_title}\n\n{answer}\n\n{footer_note}"
             keyboard = None
             if app_url.startswith("https://"):
+                url_with_lang = f"{app_url}{'&' if '?' in app_url else '?'}lang={user_lang}"
+                btn_label = "🚀 Mini App'ni ochish" if user_lang == "uz" else "🚀 Открыть Mini App"
                 keyboard = {
                     "inline_keyboard": [
-                        [{"text": "🚀 Mini App'ni ochish", "web_app": {"url": app_url}}]
+                        [{"text": btn_label, "web_app": {"url": url_with_lang}}]
                     ]
                 }
             await self.send_message(chat_id, reply, reply_markup=keyboard)
@@ -683,19 +938,29 @@ class TelegramService:
     # -----------------------------------------------------------------------
     # Helper Handlers
     # -----------------------------------------------------------------------
-    def _build_main_keyboard(self, app_url: str) -> Dict[str, Any]:
+    def _build_main_keyboard(self, app_url: str, lang: str = "uz") -> Dict[str, Any]:
+        sep = "&" if "?" in app_url else "?"
+        url_with_lang = f"{app_url}{sep}lang={lang}"
+        open_app_text = "🚀 Oqila AI ilovasini ochish" if lang == "uz" else "🚀 Открыть приложение Oqila AI"
+        demo_text = "📸 Namuna (/demo)" if lang == "uz" else "📸 Пример (/demo)"
+        help_text = "💬 Qo'llanma" if lang == "uz" else "💬 Справка"
+        change_lang_text = "🌐 Tilni o'zgartirish" if lang == "uz" else "🌐 Сменить язык"
+
         if app_url.startswith("https://"):
             return {
                 "inline_keyboard": [
                     [
                         {
-                            "text": "🚀 Oqila AI ilovasini ochish",
-                            "web_app": {"url": app_url},
+                            "text": open_app_text,
+                            "web_app": {"url": url_with_lang},
                         }
                     ],
                     [
-                        {"text": "📸 Namuna (/demo)", "callback_data": "demo"},
-                        {"text": "💬 Qo'llanma", "callback_data": "help"},
+                        {"text": demo_text, "callback_data": "demo"},
+                        {"text": help_text, "callback_data": "help"},
+                    ],
+                    [
+                        {"text": change_lang_text, "callback_data": "cmd_change_lang"},
                     ],
                 ]
             }
@@ -703,14 +968,63 @@ class TelegramService:
             "inline_keyboard": [
                 [
                     {
-                        "text": "🌐 Veb-versiyani ochish (Brauzer)",
-                        "url": app_url if app_url.startswith("http") else "http://localhost:8000",
+                        "text": ("🌐 Veb-versiyani ochish (Brauzer)" if lang == "uz" else "🌐 Открыть веб-версию (Браузер)"),
+                        "url": url_with_lang if app_url.startswith("http") else f"http://localhost:8000?lang={lang}",
                     }
+                ],
+                [
+                    {"text": change_lang_text, "callback_data": "cmd_change_lang"},
                 ]
             ]
         }
 
-    async def _handle_tax_command(self, text: str, chat_id: int, app_url: str) -> None:
+    def _build_language_keyboard(self) -> Dict[str, Any]:
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "🇺🇿 O'zbekcha", "callback_data": "set_lang_uz"},
+                    {"text": "🇷🇺 Русский", "callback_data": "set_lang_ru"},
+                ]
+            ]
+        }
+
+    def _build_terms_keyboard(self, lang: str = "uz") -> Dict[str, Any]:
+        if lang == "uz":
+            return {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "✅ Roziman va qabul qilaman",
+                            "callback_data": "accept_terms_uz",
+                        }
+                    ],
+                    [
+                        {
+                            "text": "🇷🇺 Русский язык",
+                            "callback_data": "set_lang_ru",
+                        }
+                    ],
+                ]
+            }
+        else:
+            return {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "✅ Принимаю условия соглашения",
+                            "callback_data": "accept_terms_ru",
+                        }
+                    ],
+                    [
+                        {
+                            "text": "🇺🇿 O'zbek tili",
+                            "callback_data": "set_lang_uz",
+                        }
+                    ],
+                ]
+            }
+
+    async def _handle_tax_command(self, text: str, chat_id: int, app_url: str, lang: str = "uz") -> None:
         """Parse numbers from /tax 380000 120000 and calculate profit."""
         numbers = [float(n) for n in re.findall(r"\d+", text.replace(" ", ""))]
         sale_price = 380000.0
@@ -725,54 +1039,92 @@ class TelegramService:
         res = calculate(
             sale_price=sale_price,
             cost_price=cost_price,
-            lang="uz",
+            lang=lang,
             category="craft",
             business_type="resale",
             trade_regime="ecommerce",
         )
 
-        resp = (
-            f"📊 <b>Oqila AI — Tezkor Moliya va Soliq hisobi:</b>\n\n"
-            f"💰 <b>Sotish narxi:</b> {res.sale_price:,.0f} so'm\n"
-            f"📦 <b>Tannarx:</b> {res.cost_price:,.0f} so'm\n"
-            f"📈 <b>Yalpi foyda:</b> {res.gross_profit:,.0f} so'm ({res.margin_pct}%)\n"
-            f"─────────────────────\n"
-            f"🛍️ <b>Uzum Market'da sotganda:</b>\n"
-            f"• Marketpleys komissiyasi: {res.uzum_commission_amount:,.0f} so'm\n"
-            f"• Logistika to'lovi: {res.uzum_logistics_fee:,.0f} so'm\n"
-            f"• <b>Sof foyda:</b> <b>{res.uzum_net:,.0f} so'm</b>\n"
-            f"• Zararsiz minimal narx: {res.min_price_uzum:,.0f} so'm\n"
-            f"─────────────────────\n"
-            f"🏛️ <b>Davlatga soliq (1%):</b> {res.tax_payable_item:,.0f} so'm\n"
-            f"📌 <b>YaTT oylik ijtimoiy solig'i:</b> {res.social_tax_monthly:,.0f} so'm (1 BHM)\n\n"
-            f"<i>💡 O'z narxlaringizni kiritish uchun: <code>/tax 450000 180000</code></i>"
-        )
+        url_with_lang = f"{app_url}{'&' if '?' in app_url else '?'}lang={lang}"
+
+        if lang == "ru":
+            resp = (
+                f"📊 <b>Oqila AI — Быстрый финансовый и налоговый расчёт:</b>\n\n"
+                f"💰 <b>Цена продажи:</b> {res.sale_price:,.0f} сум\n"
+                f"📦 <b>Себестоимость:</b> {res.cost_price:,.0f} сум\n"
+                f"📈 <b>Валовая прибыль:</b> {res.gross_profit:,.0f} сум ({res.margin_pct}%)\n"
+                f"─────────────────────\n"
+                f"🛍️ <b>При продаже на Uzum Market:</b>\n"
+                f"• Комиссия маркетплейса: {res.uzum_commission_amount:,.0f} сум\n"
+                f"• Логистический сбор: {res.uzum_logistics_fee:,.0f} сум\n"
+                f"• <b>Чистая прибыль:</b> <b>{res.uzum_net:,.0f} сум</b>\n"
+                f"• Минимальная безубыточная цена: {res.min_price_uzum:,.0f} сум\n"
+                f"─────────────────────\n"
+                f"🏛️ <b>Налог государству (1%):</b> {res.tax_payable_item:,.0f} сум\n"
+                f"📌 <b>Ежемесячный соцналог ЯТТ:</b> {res.social_tax_monthly:,.0f} сум (1 БРВ)\n\n"
+                f"<i>💡 Для расчёта своих цен отправьте: <code>/tax 450000 180000</code></i>"
+            )
+            calc_btn = "📊 Открыть полный калькулятор"
+        else:
+            resp = (
+                f"📊 <b>Oqila AI — Tezkor Moliya va Soliq hisobi:</b>\n\n"
+                f"💰 <b>Sotish narxi:</b> {res.sale_price:,.0f} so'm\n"
+                f"📦 <b>Tannarx:</b> {res.cost_price:,.0f} so'm\n"
+                f"📈 <b>Yalpi foyda:</b> {res.gross_profit:,.0f} so'm ({res.margin_pct}%)\n"
+                f"─────────────────────\n"
+                f"🛍️ <b>Uzum Market'da sotganda:</b>\n"
+                f"• Marketpleys komissiyasi: {res.uzum_commission_amount:,.0f} so'm\n"
+                f"• Logistika to'lovi: {res.uzum_logistics_fee:,.0f} so'm\n"
+                f"• <b>Sof foyda:</b> <b>{res.uzum_net:,.0f} so'm</b>\n"
+                f"• Zararsiz minimal narx: {res.min_price_uzum:,.0f} so'm\n"
+                f"─────────────────────\n"
+                f"🏛️ <b>Davlatga soliq (1%):</b> {res.tax_payable_item:,.0f} so'm\n"
+                f"📌 <b>YaTT oylik ijtimoiy solig'i:</b> {res.social_tax_monthly:,.0f} so'm (1 BHM)\n\n"
+                f"<i>💡 O'z narxlaringizni kiritish uchun: <code>/tax 450000 180000</code></i>"
+            )
+            calc_btn = "📊 To'liq kalkulyatorni ochish"
+
         keyboard = None
         if app_url.startswith("https://"):
             keyboard = {
                 "inline_keyboard": [
-                    [{"text": "📊 To'liq kalkulyatorni ochish", "web_app": {"url": app_url}}]
+                    [{"text": calc_btn, "web_app": {"url": url_with_lang}}]
                 ]
             }
         await self.send_message(chat_id, resp, reply_markup=keyboard)
 
-    async def _handle_demo_command(self, chat_id: int, app_url: str) -> None:
+    async def _handle_demo_command(self, chat_id: int, app_url: str, lang: str = "uz") -> None:
         """Send a rich demo product packaging card."""
-        caption = (
-            "✨ <b>Namuna: «Zarhal kashtali xon-atlas nimcha»</b>\n\n"
-            "🧵 <b>Tavsif:</b> Farg'ona vodiysi ustalari tomonidan qo'lda to'qilgan tabiiy ipak xon-atlas va "
-            "an'anaviy zarhal kashtalar uyg'unligi. Har bir chokda milliy meros va nozik did aks etgan.\n\n"
-            "💰 <b>Tavsiya etilgan narx:</b> 420 000 so'm\n"
-            "📈 <b>Sof foyda (Uzum):</b> 235 000 so'm\n"
-            "🏷️ <b>Xeshteglar:</b> #xonatlas #milliykiyim #handmade #uzumbest #oqila\n\n"
-            "<i>📸 O'z mahsulotingizni qadoqlash uchun rasmini shu chatga yuboring yoki ilovani oching!</i>"
-        )
+        url_with_lang = f"{app_url}{'&' if '?' in app_url else '?'}lang={lang}"
+        if lang == "ru":
+            caption = (
+                "✨ <b>Пример: «Хан-атласная безрукавка с золотой вышивкой»</b>\n\n"
+                "🧵 <b>Описание:</b> Натуральный шёлковый хан-атлас ручного плетения мастеров Ферганской долины "
+                "в сочетании с традиционной золотой вышивкой. В каждом стежке отражены национальные традиции и тонкий вкус.\n\n"
+                "💰 <b>Рекомендованная цена:</b> 420 000 сум\n"
+                "📈 <b>Чистая прибыль (Uzum):</b> 235 000 сум\n"
+                "🏷️ <b>Хештеги:</b> #ханатлас #национальнаяодежда #handmade #uzumbest #oqila\n\n"
+                "<i>📸 Чтобы упаковать свой товар, отправьте его фото в этот чат или откройте приложение!</i>"
+            )
+            btn_text = "🚀 Упаковать свой товар"
+        else:
+            caption = (
+                "✨ <b>Namuna: «Zarhal kashtali xon-atlas nimcha»</b>\n\n"
+                "🧵 <b>Tavsif:</b> Farg'ona vodiysi ustalari tomonidan qo'lda to'qilgan tabiiy ipak xon-atlas va "
+                "an'anaviy zarhal kashtalar uyg'unligi. Har bir chokda milliy meros va nozik did aks etgan.\n\n"
+                "💰 <b>Tavsiya etilgan narx:</b> 420 000 so'm\n"
+                "📈 <b>Sof foyda (Uzum):</b> 235 000 so'm\n"
+                "🏷️ <b>Xeshteglar:</b> #xonatlas #milliykiyim #handmade #uzumbest #oqila\n\n"
+                "<i>📸 O'z mahsulotingizni qadoqlash uchun rasmini shu chatga yuboring yoki ilovani oching!</i>"
+            )
+            btn_text = "🚀 O'z mahsulotingizni qadoqlash"
+
         demo_image = "https://images.unsplash.com/photo-1617627143750-d86bc21e42bb?w=800&auto=format&fit=crop&q=80"
         keyboard = None
         if app_url.startswith("https://"):
             keyboard = {
                 "inline_keyboard": [
-                    [{"text": "🚀 O'z mahsulotingizni qadoqlash", "web_app": {"url": app_url}}]
+                    [{"text": btn_text, "web_app": {"url": url_with_lang}}]
                 ]
             }
         sent = await self.send_photo(chat_id, demo_image, caption=caption, reply_markup=keyboard)
@@ -788,26 +1140,36 @@ class TelegramService:
         # Pick highest resolution photo
         best_photo = photos[-1]
         file_id = best_photo.get("file_id")
+        user_lang = get_user_lang(chat_id, "uz")
 
-        await self.send_message(
-            chat_id,
-            "🔍 <b>Mahsulot rasmi qabul qilindi!</b>\n\n"
-            "Sun'iy intellekt mato fakturasi, ranglar va tavsiya etilgan narxni tahlil qilmoqda... ⏳",
+        wait_msg = (
+            "🔍 <b>Фотография товара получена!</b>\n\n"
+            "Искусственный интеллект анализирует текстуру ткани, цвета и формирует описание... ⏳"
+            if user_lang == "ru"
+            else "🔍 <b>Mahsulot rasmi qabul qilindi!</b>\n\n"
+            "Sun'iy intellekt mato fakturasi, ranglar va tavsiya etilgan narxni tahlil qilmoqda... ⏳"
         )
+        await self.send_message(chat_id, wait_msg)
 
         file_bytes = await self.download_telegram_file(file_id)
         if not file_bytes:
-            await self.send_message(chat_id, "⚠️ Rasmni yuklab olishda xatolik yuz berdi. Iltimos qayta yuboring.")
+            err_msg = (
+                "⚠️ Не удалось загрузить фото. Пожалуйста, отправьте ещё раз."
+                if user_lang == "ru"
+                else "⚠️ Rasmni yuklab olishda xatolik yuz berdi. Iltimos qayta yuboring."
+            )
+            await self.send_message(chat_id, err_msg)
             return
 
         from services.ai_service import ai_service
         try:
             caption_text = msg.get("caption", "")
+            default_note = "Ремесленное или национальное изделие" if user_lang == "ru" else "Hunarmandchilik yoki milliy mahsulot"
             card = await ai_service.generate_product_card(
                 image_bytes=file_bytes,
                 image_mime="image/jpeg",
-                note=caption_text or "Hunarmandchilik yoki milliy mahsulot",
-                lang="uz",
+                note=caption_text or default_note,
+                lang=user_lang,
                 photoshoot_style="minimal_studio",
                 content_tone="sales",
                 content_format="instagram",
@@ -820,29 +1182,48 @@ class TelegramService:
             tip = html.escape(str(card.get("marketing_tip", "")))
             tags = " ".join(html.escape(str(t)) for t in card.get("hashtags", []))
 
-            reply = (
-                f"🎉 <b>Mahsulotingiz uchun tayyor marketing posti:</b>\n\n"
-                f"🏷️ <b>{title}</b>\n\n"
-                f"{desc}\n\n"
-                f"💰 <b>Narxi:</b> {price}\n\n"
-                f"📌 {tags}\n\n"
-                f"💡 <b>Savdo strategiyasi:</b>\n{tip}"
-            )
+            if user_lang == "ru":
+                reply = (
+                    f"🎉 <b>Готовый маркетинговый пост для вашего товара:</b>\n\n"
+                    f"🏷️ <b>{title}</b>\n\n"
+                    f"{desc}\n\n"
+                    f"💰 <b>Цена:</b> {price}\n\n"
+                    f"📌 {tags}\n\n"
+                    f"💡 <b>Совет по продажам:</b>\n{tip}"
+                )
+                photo_btn = "✨ Сделать AI-фотосессию (Mini App)"
+            else:
+                reply = (
+                    f"🎉 <b>Mahsulotingiz uchun tayyor marketing posti:</b>\n\n"
+                    f"🏷️ <b>{title}</b>\n\n"
+                    f"{desc}\n\n"
+                    f"💰 <b>Narxi:</b> {price}\n\n"
+                    f"📌 {tags}\n\n"
+                    f"💡 <b>Savdo strategiyasi:</b>\n{tip}"
+                )
+                photo_btn = "✨ AI Fotosessiya qilish (Mini App)"
+
             keyboard = None
             if app_url.startswith("https://"):
+                url_with_lang = f"{app_url}{'&' if '?' in app_url else '?'}lang={user_lang}"
                 keyboard = {
                     "inline_keyboard": [
-                        [{"text": "✨ AI Fotosessiya qilish (Mini App)", "web_app": {"url": app_url}}]
+                        [{"text": photo_btn, "web_app": {"url": url_with_lang}}]
                     ]
                 }
             await self.send_message(chat_id, reply, reply_markup=keyboard)
 
         except Exception as exc:
             logger.error("Error generating card from telegram photo: %s", exc)
+            fallback_err = (
+                "⚠️ Произошла ошибка при анализе изделия. Попробуйте через Mini App:"
+                if user_lang == "ru"
+                else "⚠️ Mahsulotni tahlil qilishda xatolik yuz berdi. Mini App orqali urinib ko'ring:"
+            )
             await self.send_message(
                 chat_id,
-                "⚠️ Mahsulotni tahlil qilishda xatolik yuz berdi. Mini App orqali urinib ko'ring:",
-                reply_markup=self._build_main_keyboard(app_url),
+                fallback_err,
+                reply_markup=self._build_main_keyboard(app_url, lang=user_lang),
             )
 
     async def _handle_inline_query(self, iq: Dict[str, Any], app_url: str) -> None:

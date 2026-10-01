@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+import html
 import json
 import logging
 import os
@@ -754,16 +755,12 @@ class UzumService:
             }
         return {"status": "error", "message": "Order not found"}
 
-    def generate_thermal_label_image(self, order_id: int, size: str = "LARGE") -> bytes:
+    def generate_thermal_label_svg(self, order_id: int, size: str = "LARGE") -> str:
         """
-        Generate a crisp 203 DPI monochrome thermal label image (PNG) for Bluetooth & desktop printers:
-        - 58x40 mm standard format (580x400 px) or 43x25 mm (430x250 px)
-        - Clean layout, order posting number, store title, destination city, barcode stripes
+        Generate a crisp vector SVG barcode thermal label (58x40 mm or 43x25 mm).
+        Works 100% reliably in any environment without external binary C-libraries.
         """
-        from PIL import Image, ImageDraw
-        import io
         import random
-
         orders = get_uzum_orders()
         matching = [o for o in orders if o["order_id"] == order_id]
         if matching:
@@ -772,61 +769,141 @@ class UzumService:
             o = {
                 "order_id": order_id,
                 "posting_number": f"UZ-FBS-{order_id}",
-                "shop_title": "Myrana Shop",
+                "shop_title": "Oqila Do'kon",
                 "customer_name": "Xaridor",
                 "delivery_city": "Toshkent",
-                "items": [{"product_title": "Mahsulot", "quantity": 1}],
+                "items": [{"product_title": "Milliy mahsulot", "quantity": 1}],
             }
 
         width = 580 if size == "LARGE" else 430
         height = 400 if size == "LARGE" else 250
+        size_label = "58×40 mm" if size == "LARGE" else "43×25 mm"
 
-        img = Image.new("RGB", (width, height), color="white")
-        draw = ImageDraw.Draw(img)
+        shop_title = html.escape(str(o.get("shop_title", "Do'kon")[:30]))
+        posting_num = html.escape(str(o.get("posting_number", f"UZ-FBS-{order_id}")))
+        city = html.escape(str(o.get("delivery_city", "Toshkent")))
+        customer = html.escape(str(o.get("customer_name", "Xaridor")))
 
-        # High-contrast thermal border
-        draw.rectangle([(6, 6), (width - 6, height - 6)], outline="black", width=3)
-        draw.line([(6, 44), (width - 6, 44)], fill="black", width=2)
-
-        # Header with size
-        size_label = "58×40 mm (Standard)" if size == "LARGE" else "43×25 mm"
-        draw.text((16, 14), f"UZUM MARKET FBS  •  {size_label}", fill="black")
-
-        # Shop and recipient info
-        shop_title = o.get("shop_title", "Do'kon")[:32]
-        posting_num = o.get("posting_number", f"UZ-FBS-{order_id}")
-        city = o.get("delivery_city", "Toshkent")
-        customer = o.get("customer_name", "Xaridor")
-
-        draw.text((16, 52), f"Do'kon: {shop_title}", fill="black")
-        draw.text((16, 74), f"Jo'natma: {posting_num}", fill="black")
-        draw.text((16, 96), f"Qabul qiluvchi: {customer} ({city})", fill="black")
-
-        # Barcode stripes (deterministic seed from order_id for reproducible readable pattern)
-        bar_y = 126 if size == "LARGE" else 105
+        # Generate barcode stripes
+        bar_y = 126 if size == "LARGE" else 95
         bar_h = 135 if size == "LARGE" else 65
-        x = 22
+        x = 24
         rng = random.Random(order_id)
+        barcode_rects = []
         while x < width - 24:
-            w = rng.choice([2, 3, 5, 7])
+            w = rng.choice([2, 3, 4, 6])
             gap = rng.choice([2, 3, 4])
-            draw.rectangle([(x, bar_y), (x + w, bar_y + bar_h)], fill="black")
+            barcode_rects.append(f'<rect x="{x}" y="{bar_y}" width="{w}" height="{bar_h}" fill="#000000" />')
             x += w + gap
 
-        # Human-readable barcode string
-        text_y = bar_y + bar_h + 8
-        draw.text((width // 2 - 75, text_y), f"* {posting_num} *", fill="black")
-
-        # Items info at bottom
+        barcode_svg_bars = "\n    ".join(barcode_rects)
         items = o.get("items", [])
+        item_str = ""
         if items:
             it = items[0]
-            it_str = f"Tarkibi: {it.get('product_title', '')[:30]} ({it.get('quantity', 1)} dona)"
-            draw.text((16, height - 30), it_str, fill="black")
+            item_str = html.escape(f"Tarkibi: {it.get('product_title', '')[:28]} ({it.get('quantity', 1)} dona)")
 
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
+        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" height="auto" style="background:#ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;">
+    <!-- Thermal label border -->
+    <rect x="4" y="4" width="{width - 8}" height="{height - 8}" rx="8" fill="#ffffff" stroke="#000000" stroke-width="3" />
+    <line x1="4" y1="46" x2="{width - 4}" y2="46" stroke="#000000" stroke-width="2" />
+    
+    <!-- Header -->
+    <text x="16" y="32" font-size="16" font-weight="900" fill="#000000" letter-spacing="1">UZUM MARKET FBS • {size_label}</text>
+    
+    <!-- Meta details -->
+    <text x="16" y="70" font-size="14" font-weight="700" fill="#000000">Do'kon: <tspan font-weight="500">{shop_title}</tspan></text>
+    <text x="16" y="92" font-size="14" font-weight="700" fill="#000000">Jo'natma: <tspan font-weight="900" font-family="monospace">{posting_num}</tspan></text>
+    <text x="16" y="114" font-size="13" font-weight="500" fill="#333333">Qabul qiluvchi: {customer} ({city})</text>
+    
+    <!-- Barcode lines -->
+    {barcode_svg_bars}
+    
+    <!-- Barcode human text -->
+    <text x="{width // 2}" y="{bar_y + bar_h + 22}" font-size="15" font-weight="800" font-family="monospace" text-anchor="middle" letter-spacing="3" fill="#000000">* {posting_num} *</text>
+    
+    <!-- Bottom footer -->
+    <text x="16" y="{height - 16}" font-size="12" font-weight="500" fill="#444444">{item_str}</text>
+</svg>"""
+        return svg
+
+    def generate_thermal_label_image(self, order_id: int, size: str = "LARGE") -> bytes:
+        """
+        Generate a crisp 203 DPI monochrome thermal label image (PNG) for Bluetooth & desktop printers:
+        - 58x40 mm standard format (580x400 px) or 43x25 mm (430x250 px)
+        - Clean layout, order posting number, store title, destination city, barcode stripes
+        """
+        try:
+            from PIL import Image, ImageDraw
+            import io
+            import random
+
+            orders = get_uzum_orders()
+            matching = [o for o in orders if o["order_id"] == order_id]
+            if matching:
+                o = matching[0]
+            else:
+                o = {
+                    "order_id": order_id,
+                    "posting_number": f"UZ-FBS-{order_id}",
+                    "shop_title": "Oqila Do'kon",
+                    "customer_name": "Xaridor",
+                    "delivery_city": "Toshkent",
+                    "items": [{"product_title": "Mahsulot", "quantity": 1}],
+                }
+
+            width = 580 if size == "LARGE" else 430
+            height = 400 if size == "LARGE" else 250
+
+            img = Image.new("RGB", (width, height), color="white")
+            draw = ImageDraw.Draw(img)
+
+            # High-contrast thermal border
+            draw.rectangle([(6, 6), (width - 6, height - 6)], outline="black", width=3)
+            draw.line([(6, 44), (width - 6, 44)], fill="black", width=2)
+
+            # Header with size
+            size_label = "58×40 mm (Standard)" if size == "LARGE" else "43×25 mm"
+            draw.text((16, 14), f"UZUM MARKET FBS  •  {size_label}", fill="black")
+
+            # Shop and recipient info
+            shop_title = o.get("shop_title", "Do'kon")[:32]
+            posting_num = o.get("posting_number", f"UZ-FBS-{order_id}")
+            city = o.get("delivery_city", "Toshkent")
+            customer = o.get("customer_name", "Xaridor")
+
+            draw.text((16, 52), f"Do'kon: {shop_title}", fill="black")
+            draw.text((16, 74), f"Jo'natma: {posting_num}", fill="black")
+            draw.text((16, 96), f"Qabul qiluvchi: {customer} ({city})", fill="black")
+
+            # Barcode stripes
+            bar_y = 126 if size == "LARGE" else 105
+            bar_h = 135 if size == "LARGE" else 65
+            x = 22
+            rng = random.Random(order_id)
+            while x < width - 24:
+                w = rng.choice([2, 3, 5, 7])
+                gap = rng.choice([2, 3, 4])
+                draw.rectangle([(x, bar_y), (x + w, bar_y + bar_h)], fill="black")
+                x += w + gap
+
+            # Human-readable barcode string
+            text_y = bar_y + bar_h + 8
+            draw.text((width // 2 - 75, text_y), f"* {posting_num} *", fill="black")
+
+            # Items info at bottom
+            items = o.get("items", [])
+            if items:
+                it = items[0]
+                it_str = f"Tarkibi: {it.get('product_title', '')[:30]} ({it.get('quantity', 1)} dona)"
+                draw.text((16, height - 30), it_str, fill="black")
+
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except Exception as exc:
+            logger.warning("Could not generate PNG via Pillow (%s), generating SVG bytes fallback", exc)
+            return self.generate_thermal_label_svg(order_id, size=size).encode("utf-8")
 
     async def send_fbo_restock_alert(self, chat_id: int, sku_id: Optional[int] = None) -> bool:
         """Send proactive Telegram push notification warning about imminent out-of-stock on Uzum FBO."""

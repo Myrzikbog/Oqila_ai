@@ -21,7 +21,14 @@ import {
 
 export default function App() {
   const [lang, setLang] = useState(() => {
-    return localStorage.getItem('oqila_lang') || 'ru';
+    try {
+      const urlLang = new URLSearchParams(window.location.search).get('lang');
+      if (urlLang && ['ru', 'uz'].includes(urlLang)) {
+        localStorage.setItem('oqila_lang', urlLang);
+        return urlLang;
+      }
+    } catch {}
+    return localStorage.getItem('oqila_lang') || 'uz';
   });
   const [theme, setTheme] = useState(getInitialTheme);
   const [activeTab, setActiveTab] = useState(() => {
