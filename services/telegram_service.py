@@ -12,16 +12,18 @@ Features:
 """
 from __future__ import annotations
 
+import html
 import io
 import json
 import logging
 import os
 import random
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
-from services.database import log_event, save_subscriber
+from services.database import log_event, save_subscriber, unsubscribe_subscriber
 from services.legal_calc import calculate
 
 logger = logging.getLogger("oqila_telegram")
@@ -37,6 +39,15 @@ DAILY_TIPS_UZ = [
     "🏷️ <b>Xaridorni jalb qilish:</b> Narxni 199 000 so'm yoki 249 000 so'm qilib belgilash (psixologik narxlash) yaxlit 200 000 yoki 250 000 so'mdan ko'ra 15% ko'proq buyurtma olib keladi.",
 ]
 
+DAILY_TIPS_RU = [
+    "💡 <b>Совет по продажам:</b> Продавая на Uzum Market, закладывайте в цену наценку не менее 25-30%. Это покроет комиссию маркетплейса (~12-14%) и логистику, оставляя вам чистую прибыль.",
+    "🧵 <b>Для мастериц и ремесленниц:</b> Члены ассоциации «Хунарманд» полностью освобождены от налога с оборота (0%)! Для остальных самозанятых с 2026 г. действует ставка 1%.",
+    "📸 <b>Визуальный маркетинг:</b> В соцсетях и Telegram показывайте товар в реальной обстановке (одежду на модели, декор в интерьере) — это повышает конверсию на 40%.",
+    "📦 <b>Перепродажа (Китай/рынки):</b> Важно! Перепродавать чужие покупные товары в статусе самозанятого ЗАПРЕЩЕНО законом. Оформите ЯТТ (налог с оборота 1%), чтобы избежать штрафов.",
+    "💳 <b>Приём платежей:</b> Подключение Click и Payme повышает доверие покупателей в 2 раза. Комиссия эквайринга составляет около 1.5%.",
+    "🏷️ <b>Психология цен:</b> Цены 199 000 или 249 000 сум привлекают на 15% больше заказов, чем круглые суммы 200 000 или 250 000 сум.",
+]
+
 TAX_CALENDAR_TEXT_UZ = (
     "📅 <b>O'zbekiston 2026 — Kichik biznes va YaTT Soliq Taqvimi:</b>\n\n"
     "📌 <b>Har oyning 15-sanasigacha:</b>\n"
@@ -50,8 +61,24 @@ TAX_CALENDAR_TEXT_UZ = (
     "QQS (12%) to'lovchisi sifatida ro'yxatdan o'tish majburiyati vujudga keladi."
 )
 
+TAX_CALENDAR_TEXT_RU = (
+    "📅 <b>Узбекистан 2026 — Налоговый календарь для малого бизнеса и ЯТТ:</b>\n\n"
+    "📌 <b>Каждый месяц до 15-го числа:</b>\n"
+    "• Обязательный соцналог для ЯТТ — 1 БРВ (440 000 сум). Оплачивается через приложение Soliq.\n\n"
+    "📌 <b>По итогам квартала (каждые 3 месяца):</b>\n"
+    "• Налог с оборота (единая ставка 1%, ст. 467 НК РУз) — до 15-го числа месяца, следующего за кварталом.\n\n"
+    "📌 <b>Самозанятые лица:</b>\n"
+    "• Налог с оборота — 1% (с 1 января 2026 г., ст. 467 НК РУз).\n"
+    "• Соцналог для трудового стажа — добровольно 1 БРВ в год.\n\n"
+    "⚠️ <b>При годовом обороте свыше 1 млрд сум:</b>\n"
+    "Возникает обязательство перехода на НДС (12%) и налог на прибыль."
+)
+
 
 class TelegramService:
+    def __init__(self) -> None:
+        self._verified_admin_tg_ids: set[str] = set()
+
     @property
     def bot_token(self) -> str:
         return os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -93,6 +120,12 @@ class TelegramService:
                 if res.status_code == 200:
                     return True
                 logger.error("Telegram sendMessage error: %s - %s", res.status_code, res.text)
+                # If entity parse error occurred, retry sending without parse_mode as plain text
+                if "can't parse entities" in res.text and payload.get("parse_mode"):
+                    payload_plain = dict(payload)
+                    payload_plain.pop("parse_mode", None)
+                    res_plain = await client.post(self._api_url("sendMessage"), json=payload_plain)
+                    return res_plain.status_code == 200
                 return False
         except Exception as exc:
             logger.error("Failed to send telegram message: %s", exc)
@@ -148,6 +181,96 @@ class TelegramService:
         except Exception as exc:
             logger.error("Failed to send photo: %s", exc)
             return False
+
+    async def send_document(
+        self,
+        chat_id: int | str,
+        document_bytes: bytes,
+        filename: str = "report.csv",
+        caption: Optional[str] = None,
+        reply_markup: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Send a document or file directly to a Telegram chat."""
+        if not self.is_configured:
+            return False
+        data: Dict[str, Any] = {"chat_id": str(chat_id)}
+        if caption:
+            data["caption"] = caption[:1024]
+            data["parse_mode"] = "HTML"
+        if reply_markup:
+            data["reply_markup"] = json.dumps(reply_markup)
+        files = {
+            "document": (filename, document_bytes, "text/csv")
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                res = await client.post(self._api_url("sendDocument"), data=data, files=files)
+                return res.status_code == 200
+        except Exception as exc:
+            logger.error("Failed to send document to %s: %s", chat_id, exc)
+            return False
+
+    async def edit_message_text(
+        self,
+        chat_id: int | str,
+        message_id: int,
+        text: str,
+        reply_markup: Optional[Dict[str, Any]] = None,
+        parse_mode: str = "HTML",
+    ) -> bool:
+        """Edit an existing Telegram message text."""
+        if not self.is_configured:
+            return False
+        payload: Dict[str, Any] = {
+            "chat_id": str(chat_id),
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": parse_mode,
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(self._api_url("editMessageText"), json=payload)
+                return res.status_code == 200
+        except Exception as exc:
+            logger.error("Failed to edit message in %s: %s", chat_id, exc)
+            return False
+
+    def is_admin_user(self, user_id: int | str, provided_key: Optional[str] = None) -> bool:
+        """Check if Telegram user is authorized as an administrator."""
+        uid_str = str(user_id).strip()
+        if uid_str in self._verified_admin_tg_ids:
+            return True
+
+        secret_key = os.getenv("ADMIN_SECRET_KEY", "oqila_admin_2026").strip()
+        if provided_key and provided_key.strip() == secret_key:
+            self._verified_admin_tg_ids.add(uid_str)
+            try:
+                from services.database import set_user_admin
+                set_user_admin(int(user_id), True)
+            except Exception:
+                pass
+            return True
+
+        admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "").strip()
+        if admin_ids_str:
+            admin_ids = [i.strip() for i in admin_ids_str.split(",") if i.strip()]
+            if uid_str in admin_ids:
+                self._verified_admin_tg_ids.add(uid_str)
+                return True
+
+        # Check database persistent status
+        try:
+            from services.database import get_user_by_tg_id
+            u = get_user_by_tg_id(int(user_id))
+            if u and u.get("is_admin"):
+                self._verified_admin_tg_ids.add(uid_str)
+                return True
+        except Exception:
+            pass
+
+        return False
 
     async def answer_callback_query(self, callback_query_id: str, text: Optional[str] = None) -> bool:
         """Acknowledge a callback query from an inline keyboard button."""
@@ -215,10 +338,12 @@ class TelegramService:
             {"command": "start", "description": "🚀 Oqila AI ilovasi (Mini App)"},
             {"command": "demo", "description": "📸 Namuna mahsulot qadoqlash"},
             {"command": "tax", "description": "💰 Soliq & marja hisobi (masalan: /tax 350000 120000)"},
+            {"command": "uzum", "description": "🛍️ Uzum Market: do'konlar, buyurtmalar va qoldiqlar"},
             {"command": "price", "description": "🏷️ Narx va sof foyda hisobi"},
             {"command": "tips", "description": "💡 Kunlik biznes maslahati"},
             {"command": "calendar", "description": "📅 Soliq va hisobot taqvimi"},
             {"command": "subscribe", "description": "🔔 Soliq eslatmalariga obuna"},
+            {"command": "unsubscribe", "description": "🔕 Obunani bekor qilish"},
             {"command": "help", "description": "ℹ️ Bot qo'llanmasi va yordam"},
         ]
         try:
@@ -231,15 +356,20 @@ class TelegramService:
             logger.error("Failed to set bot commands: %s", exc)
             return False
 
-    async def set_webhook(self, webhook_url: str) -> Dict[str, Any]:
-        """Configure Telegram webhook."""
+    async def set_webhook(self, webhook_url: str, secret_token: Optional[str] = None) -> Dict[str, Any]:
+        """Configure Telegram webhook with optional secret_token validation."""
         if not self.is_configured:
             return {"ok": False, "description": "TELEGRAM_BOT_TOKEN not configured"}
 
         url = f"{webhook_url.rstrip('/')}/api/telegram-webhook"
+        token = secret_token or os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip() or None
+        payload: Dict[str, Any] = {"url": url}
+        if token:
+            payload["secret_token"] = token
+
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(self._api_url("setWebhook"), json={"url": url})
+                res = await client.post(self._api_url("setWebhook"), json=payload)
                 data = res.json()
                 logger.info("Set webhook to %s: %s", url, data)
                 # Auto configure commands menu as well
@@ -286,6 +416,7 @@ class TelegramService:
                     "• 🚀 <b>Mini App:</b> Pastdagi tugmani bosib to'liq AI Studiya va kalkulyatorni oching.\n"
                     "• 📸 <b>Rasm yuboring:</b> Mahsulot rasmini shu chatga yuborsangiz, AI uni tahlil qilib sotiq matnini tayyorlaydi.\n"
                     "• 💰 <b>/tax 380000 120000:</b> Tezkor soliq va Uzum sof foydasi hisobi.\n"
+                    "• 🛍️ <b>/uzum:</b> Uzum Market do'konlari, yangi buyurtmalar va qoldiqlar.\n"
                     "• 💡 <b>/tips:</b> Ayol tadbirkorlar uchun foydali maslahat.\n"
                     "• 📅 <b>/calendar:</b> O'zR soliq muddatlari va hisobotlar."
                 )
@@ -293,6 +424,116 @@ class TelegramService:
             elif cb_data == "tips" and chat_id:
                 tip = random.choice(DAILY_TIPS_UZ)
                 await self.send_message(chat_id, tip)
+            elif cb_data and cb_data.startswith("uzum_confirm_"):
+                try:
+                    order_id = int(cb_data.replace("uzum_confirm_", ""))
+                    from services.uzum_service import uzum_service
+                    await uzum_service.confirm_order(order_id)
+                    await self.send_message(
+                        chat_id,
+                        f"✅ <b>Buyurtma #{order_id} muvaffaqiyatli tasdiqlandi!</b>\n\n"
+                        f"📦 Holat: <b>Yig'ilmoqda (В сборке)</b>\n"
+                        f"🏷️ Shtrix-kod etiketkasini chiqarib, buyurtmaga yopishtiring va Uzum punktiga topshiring.",
+                    )
+                except Exception as exc:
+                    logger.error("Error in uzum_confirm callback: %s", exc)
+            elif cb_data and cb_data.startswith("uzum_label_"):
+                try:
+                    order_id = int(cb_data.replace("uzum_label_", ""))
+                    from services.uzum_service import uzum_service
+                    label_bytes = uzum_service.generate_thermal_label_image(order_id, size="LARGE")
+
+                    caption = (
+                        f"🏷️ <b>Uzum FBS Markirovka etiketkasi</b>\n\n"
+                        f"📦 Buyurtma: <code>#{order_id}</code>\n"
+                        f"📏 Standart o'lcham: <b>58×40 mm (203 DPI)</b>\n\n"
+                        f"💡 <i>Ushbu rasmni to'g'ridan-to'g'ri Bluetooth termoprinterga yuborib chop etishingiz yoki skaner qilishingiz mumkin!</i>"
+                    )
+
+                    keyboard = {
+                        "inline_keyboard": [
+                            [
+                                {
+                                    "text": "✅ Tasdiqlash / Подтвердить",
+                                    "callback_data": f"uzum_confirm_{order_id}",
+                                }
+                            ],
+                            [
+                                {
+                                    "text": "📱 Oqila ilovasini ochish",
+                                    "web_app": {"url": f"{app_url}?tab=uzum"} if app_url.startswith("https://") else None,
+                                    "url": app_url if not app_url.startswith("https://") else None,
+                                }
+                            ]
+                        ]
+                    }
+                    keyboard["inline_keyboard"] = [
+                        [btn for btn in row if btn.get("url") or btn.get("web_app") or btn.get("callback_data")]
+                        for row in keyboard["inline_keyboard"]
+                    ]
+
+                    await self.send_photo(
+                        chat_id=chat_id,
+                        photo_url_or_bytes=label_bytes,
+                        caption=caption,
+                        reply_markup=keyboard,
+                    )
+                except Exception as exc:
+                    logger.error("Error generating label photo in Telegram: %s", exc)
+                    await self.send_message(
+                        chat_id,
+                        f"🏷️ Buyurtma #{order_id} etiketkasi ilovada mavjud.",
+                    )
+            elif cb_data == "admin_refresh" and chat_id:
+                cb_user_id = cb.get("from", {}).get("id")
+                if not self.is_admin_user(cb_user_id):
+                    await self.send_message(chat_id, "⛔ <b>Sizda admin huquqlari mavjud emas.</b>")
+                else:
+                    msg_id = cb.get("message", {}).get("message_id")
+                    await self._handle_admin_command(
+                        chat_id=chat_id,
+                        app_url=app_url,
+                        text="/admin",
+                        user_id=cb_user_id,
+                        is_refresh=True,
+                        message_id=msg_id,
+                    )
+            elif cb_data == "admin_csv_users" and chat_id:
+                cb_user_id = cb.get("from", {}).get("id")
+                if not self.is_admin_user(cb_user_id):
+                    await self.send_message(chat_id, "⛔ <b>Sizda admin huquqlari mavjud emas.</b>")
+                else:
+                    from services.database import get_all_users
+                    from services.csv_service import generate_users_csv
+                    from datetime import datetime
+                    users = get_all_users(limit=10000, offset=0)
+                    csv_bytes = generate_users_csv(users)
+                    fname = f"oqila_users_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                    caption = (
+                        f"📊 <b>Oqila AI — Foydalanuvchilar bazasi</b>\n\n"
+                        f"👥 Jami: <b>{len(users)}</b> ta tadbirkor\n"
+                        f"📅 Sana: <code>{datetime.now().strftime('%d.%m.%Y %H:%M')}</code>\n\n"
+                        f"<i>Microsoft Excel uchun to'liq moslashtirilgan (UTF-8 BOM, ';').</i>"
+                    )
+                    await self.send_document(chat_id, csv_bytes, filename=fname, caption=caption)
+            elif cb_data == "admin_csv_cards" and chat_id:
+                cb_user_id = cb.get("from", {}).get("id")
+                if not self.is_admin_user(cb_user_id):
+                    await self.send_message(chat_id, "⛔ <b>Sizda admin huquqlari mavjud emas.</b>")
+                else:
+                    from services.database import get_admin_cards
+                    from services.csv_service import generate_cards_csv
+                    from datetime import datetime
+                    cards = get_admin_cards(limit=10000, offset=0)
+                    csv_bytes = generate_cards_csv(cards)
+                    fname = f"oqila_cards_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+                    caption = (
+                        f"📦 <b>Oqila AI — Mahsulot kartochkalari</b>\n\n"
+                        f"✨ Jami: <b>{len(cards)}</b> ta kartochka\n"
+                        f"📅 Sana: <code>{datetime.now().strftime('%d.%m.%Y %H:%M')}</code>\n\n"
+                        f"<i>Microsoft Excel uchun to'liq moslashtirilgan (UTF-8 BOM, ';').</i>"
+                    )
+                    await self.send_document(chat_id, csv_bytes, filename=fname, caption=caption)
             return
 
         if "message" not in update:
@@ -301,7 +542,7 @@ class TelegramService:
         msg = update["message"]
         chat_id = msg.get("chat", {}).get("id")
         user = msg.get("from", {})
-        username = user.get("username") or user.get("first_name", "Tadbirkor")
+        username = html.escape(user.get("username") or user.get("first_name", "Tadbirkor"))
 
         if not chat_id:
             return
@@ -357,17 +598,60 @@ class TelegramService:
         elif text.startswith("/calendar"):
             await self.send_message(chat_id, TAX_CALENDAR_TEXT_UZ)
 
+        elif text.startswith("/uzum"):
+            from services.database import get_uzum_shops, get_uzum_orders, get_uzum_finance_summary
+            shops = get_uzum_shops()
+            orders = get_uzum_orders(status="CREATED")
+            fin = get_uzum_finance_summary()
+
+            shops_str = ""
+            for s in shops:
+                shops_str += f"• <b>{s['title']}</b> (Kutilayotgan buyurtmalar: {s.get('pending_orders_count', 0)})\n"
+            if not shops_str:
+                shops_str = "• <i>Hozircha do'konlar ulanmagan (Oqila ilovasida Uzum API kalitini kiriting).</i>\n"
+
+            uzum_status_text = (
+                "🛍️ <b>Uzum Market — Do'konlar va Buyurtmalar:</b>\n\n"
+                f"🏢 <b>Do'konlaringiz:</b>\n{shops_str}\n"
+                f"⏳ <b>Tasdiqlash kutilayotgan buyurtmalar:</b> {len(orders)} ta\n"
+                f"💰 <b>Jami tushum (barcha do'konlar):</b> {fin.get('gross_revenue', 0):,.0f} so'm\n"
+                f"💳 <b>Kutilayotgan sof to'lov:</b> {fin.get('net_payout', 0):,.0f} so'm\n\n"
+                "👇 <i>Buyurtmalarni tasdiqlash va boshqarish uchun ilovani oching:</i>"
+            )
+            keyboard = {
+                "inline_keyboard": [
+                    [{"text": "🛍️ Uzum bo'limini ochish", "web_app": {"url": f"{app_url}?tab=uzum"}}] if app_url.startswith("https://") else []
+                ]
+            }
+            keyboard["inline_keyboard"] = [row for row in keyboard["inline_keyboard"] if row]
+            await self.send_message(chat_id, uzum_status_text, reply_markup=keyboard)
+
         elif text.startswith("/subscribe"):
             success = save_subscriber(chat_id, username=username, lang="uz")
             if success:
                 msg_sub = (
                     "🔔 <b>Tabriklaymiz! Siz Oqila AI eslatmalariga obuna bo'ldingiz.</b>\n\n"
                     "Endi siz har oyning 15-sanasigacha soliq to'lovlari bo'yicha eslatmalar "
-                    "hamda biznesingizni o'stiruvchi foydali tavsiyalarni olasiz!"
+                    "hamda biznesingizni o'stiruvchi foydali tavsiyalarni olasiz!\n\n"
+                    "<i>Obunani bekor qilish uchun: /unsubscribe</i>"
                 )
             else:
                 msg_sub = "⚠️ Obunani rasmiylashtirishda xatolik yuz berdi. Iltimos qayta urinib ko'ring."
             await self.send_message(chat_id, msg_sub)
+
+        elif text.startswith("/unsubscribe"):
+            success = unsubscribe_subscriber(chat_id)
+            if success:
+                msg_unsub = (
+                    "🔕 <b>Obunangiz bekor qilindi.</b>\n\n"
+                    "Siz endi botdan avtomatik eslatmalarni olmaysiz. "
+                    "Qayta obuna bo'lish uchun istalgan vaqtda /subscribe buyrug'ini yuborishingiz mumkin."
+                )
+            else:
+                msg_unsub = "ℹ️ Siz avval obuna bo'lmagansiz yoki obuna allaqachon bekor qilingan."
+        elif text.startswith("/admin"):
+            user_id = user.get("id")
+            await self._handle_admin_command(chat_id, app_url, text, user_id=user_id)
 
         elif text.startswith("/help"):
             help_text = (
@@ -530,14 +814,19 @@ class TelegramService:
                 generate_photo=False,
             )
 
-            tags = " ".join(card.get("hashtags", []))
+            title = html.escape(str(card.get("title", "")))
+            desc = html.escape(str(card.get("description", "")))
+            price = html.escape(str(card.get("price_tag", "")))
+            tip = html.escape(str(card.get("marketing_tip", "")))
+            tags = " ".join(html.escape(str(t)) for t in card.get("hashtags", []))
+
             reply = (
                 f"🎉 <b>Mahsulotingiz uchun tayyor marketing posti:</b>\n\n"
-                f"🏷️ <b>{card.get('title')}</b>\n\n"
-                f"{card.get('description')}\n\n"
-                f"💰 <b>Narxi:</b> {card.get('price_tag')}\n\n"
+                f"🏷️ <b>{title}</b>\n\n"
+                f"{desc}\n\n"
+                f"💰 <b>Narxi:</b> {price}\n\n"
                 f"📌 {tags}\n\n"
-                f"💡 <b>Savdo strategiyasi:</b>\n{card.get('marketing_tip')}"
+                f"💡 <b>Savdo strategiyasi:</b>\n{tip}"
             )
             keyboard = None
             if app_url.startswith("https://"):
@@ -617,5 +906,96 @@ class TelegramService:
         ]
         await self.answer_inline_query(iq_id, results)
 
+    async def _handle_admin_command(
+        self,
+        chat_id: int,
+        app_url: str,
+        text: str,
+        user_id: Optional[int] = None,
+        is_refresh: bool = False,
+        message_id: Optional[int] = None,
+    ) -> None:
+        """Handle /admin command, authenticate admin, show stats and action buttons."""
+        parts = text.strip().split(maxsplit=1)
+        provided_key = parts[1].strip() if len(parts) > 1 else None
+
+        effective_uid = user_id or chat_id
+        if not self.is_admin_user(effective_uid, provided_key=provided_key):
+            denied_msg = (
+                "⛔ <b>Kirish taqiqlangan!</b>\n\n"
+                "Sizda admin huquqlari mavjud emas.\n\n"
+                "Agar sizda maxfiy administrator kaliti bo'lsa, quyidagicha yuboring:\n"
+                "<code>/admin MAXFIY_KALIT</code>"
+            )
+            await self.send_message(chat_id, denied_msg)
+            return
+
+        from services.database import get_admin_dashboard_metrics, get_uzum_shops
+        metrics = get_admin_dashboard_metrics()
+        shops = get_uzum_shops()
+        secret_key = os.getenv("ADMIN_SECRET_KEY", "oqila_admin_2026").strip()
+
+        total_users = metrics.get("total_users", 0)
+        active_today = metrics.get("active_today", 0)
+        new_this_week = metrics.get("new_this_week", 0)
+        total_cards = metrics.get("total_cards", 0)
+        total_subscribers = metrics.get("total_subscribers", 0)
+        total_events = metrics.get("total_events", 0)
+
+        # Build WebApp & Browser URLs with embedded secret key for instant 1-click access
+        base_clean = app_url.rstrip("/")
+        admin_webapp_url = f"{base_clean}/admin?key={secret_key}"
+
+        now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+        admin_text = (
+            f"🛡️ <b>Oqila AI — Admin Boshqaruv Paneli</b>\n\n"
+            f"📊 <b>Jonli ko'rsatkichlar ({now_str}):</b>\n"
+            f"• 👥 <b>Foydalanuvchilar:</b> <b>{total_users:,}</b> ta (Bugun faol: <b>{active_today:,}</b> | Haftada yangi: <b>{new_this_week:,}</b>)\n"
+            f"• 📦 <b>AI Kartochkalar:</b> <b>{total_cards:,}</b> ta\n"
+            f"• 🔔 <b>Bot obunachilari:</b> <b>{total_subscribers:,}</b> ta\n"
+            f"• 🛍️ <b>Uzum do'konlari:</b> <b>{len(shops)}</b> ta\n"
+            f"• ⚡ <b>Tizim hodisalari:</b> <b>{total_events:,}</b> ta\n\n"
+            f"<i>Quyidagi tugmalar orqali WebApp boshqaruv panelini ochishingiz yoki Excel/CSV hisobotlarni to'g'ridan-to'g'ri Telegram chatga yuklab olishingiz mumkin:</i>"
+        )
+
+        buttons = []
+        if admin_webapp_url.startswith("https://"):
+            buttons.append([
+                {
+                    "text": "🖥️ Admin Panelni ochish (WebApp)",
+                    "web_app": {"url": admin_webapp_url},
+                }
+            ])
+        else:
+            buttons.append([
+                {
+                    "text": "🌐 Brauzerda ochish (Admin Panel)",
+                    "url": admin_webapp_url,
+                }
+            ])
+
+        buttons.append([
+            {"text": "📥 Foydalanuvchilar (CSV/Excel)", "callback_data": "admin_csv_users"},
+            {"text": "📦 Mahsulotlar (CSV/Excel)", "callback_data": "admin_csv_cards"},
+        ])
+        buttons.append([
+            {"text": "🔄 Yangilash", "callback_data": "admin_refresh"},
+        ])
+
+        keyboard = {"inline_keyboard": buttons}
+
+        if is_refresh and message_id:
+            ok = await self.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=admin_text,
+                reply_markup=keyboard,
+            )
+            if not ok:
+                await self.send_message(chat_id, admin_text, reply_markup=keyboard)
+        else:
+            await self.send_message(chat_id, admin_text, reply_markup=keyboard)
+
 
 telegram_service = TelegramService()
+

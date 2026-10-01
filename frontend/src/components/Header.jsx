@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Sun, Moon, History, User } from 'lucide-react';
+import { Sparkles, Sun, Moon, History, User, Shield } from 'lucide-react';
 import { hapticImpact } from '../utils/telegram';
 
 export default function Header({ 
@@ -41,6 +41,21 @@ export default function Header({
 
         {/* Right actions: Profile + History + Theme toggle + Language Segmented Control */}
         <div className="flex items-center space-x-1.5">
+          {/* Admin Panel Quick Link */}
+          {profile?.is_admin && (
+            <button
+              type="button"
+              onClick={() => {
+                hapticImpact('medium');
+                window.location.href = '/admin';
+              }}
+              className="p-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 transition-all active:scale-95 flex items-center shadow-xs"
+              title="Admin Panel"
+            >
+              <Shield className="w-4 h-4 text-amber-500" />
+            </button>
+          )}
+
           {/* Profile / Business settings button */}
           <button
             type="button"

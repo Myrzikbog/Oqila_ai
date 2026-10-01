@@ -18,12 +18,14 @@ import {
   Briefcase
 } from 'lucide-react';
 import { getTelegramUser, hapticImpact, hapticNotify } from '../utils/telegram';
+import { saveProfileToBackend } from '../utils/auth';
 
 export default function ProfileModal({
   isOpen,
   onClose,
   isOnboarding = false,
   profile,
+  userId,
   onSave,
   lang,
   t
@@ -40,7 +42,7 @@ export default function ProfileModal({
       setName(profile.name || tgUser?.first_name || '');
       setStatus(profile.status || 'self_employed');
       setCategory(profile.category || 'sewing');
-      setSalesChannel(profile.salesChannel || 'uzum');
+      setSalesChannel(profile.salesChannel || profile.sales_channel || 'uzum');
     } else if (tgUser?.first_name) {
       setName(tgUser.first_name);
     }
@@ -48,16 +50,20 @@ export default function ProfileModal({
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     hapticNotify('success');
     const updatedProfile = {
       name: name.trim() || (lang === 'uz' ? 'Tadbirkor' : 'Предпринимательница'),
       status,
       category,
       salesChannel,
+      lang,
       onboardingCompleted: true,
       updatedAt: new Date().toISOString(),
     };
+    if (userId) {
+      saveProfileToBackend(userId, updatedProfile);
+    }
     onSave(updatedProfile);
     onClose();
   };
@@ -69,9 +75,13 @@ export default function ProfileModal({
       status: 'self_employed',
       category: 'sewing',
       salesChannel: 'uzum',
+      lang,
       onboardingCompleted: true,
       updatedAt: new Date().toISOString(),
     };
+    if (userId) {
+      saveProfileToBackend(userId, defaultProfile);
+    }
     onSave(defaultProfile);
     onClose();
   };
@@ -185,6 +195,12 @@ export default function ProfileModal({
                       ? 'Moliya va huquqiy yordamchi uchun biznes parametrlari'
                       : 'Параметры бизнеса для финансовых расчётов и консультаций ИИ')}
               </p>
+              {userId && (
+                <div className="inline-flex items-center space-x-1 mt-1 px-2 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/30 text-[9.5px] text-teal-200 font-medium">
+                  <Check className="w-2.5 h-2.5 text-teal-300" />
+                  <span>{lang === 'uz' ? 'Server bilan sinxronlangan' : 'Синхронизировано с сервером'}</span>
+                </div>
+              )}
             </div>
           </div>
 

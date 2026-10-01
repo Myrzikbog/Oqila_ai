@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { hapticImpact, hapticNotify } from '../utils/telegram';
 
-export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang }) {
+export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, userId }) {
   const [historyItems, setHistoryItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
@@ -30,7 +30,8 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang })
     try {
       const q = searchQuery.trim() ? `&search=${encodeURIComponent(searchQuery.trim())}` : '';
       const fav = onlyFavorites ? '&favorites_only=true' : '';
-      const res = await fetch(`/api/history?limit=100${q}${fav}`);
+      const u = userId ? `&user_id=${userId}` : '';
+      const res = await fetch(`/api/history?limit=100${q}${fav}${u}`);
       const data = await res.json();
       setHistoryItems(data.items || []);
     } catch (err) {

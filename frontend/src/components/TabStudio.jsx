@@ -51,7 +51,7 @@ const DEFAULT_PROMPTS = {
   }
 };
 
-export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad }) {
+export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, userId }) {
   // Form State
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -277,6 +277,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad }
     formData.append('content_tone', contentTone);
     formData.append('content_format', contentFormat);
     formData.append('generate_photo', generatePhoto ? 'true' : 'false');
+    if (userId) formData.append('user_id', userId);
 
     try {
       setErrorMessage('');

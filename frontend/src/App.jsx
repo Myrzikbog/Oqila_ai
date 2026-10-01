@@ -3,12 +3,14 @@ import Header from './components/Header';
 import BottomNav from './components/BottomNav';
 import TabStudio from './components/TabStudio';
 import TabFinance from './components/TabFinance';
+import TabUzum from './components/TabUzum';
 import TabLegal from './components/TabLegal';
 import TabAbout from './components/TabAbout';
 import HistoryModal from './components/HistoryModal';
 import ProfileModal from './components/ProfileModal';
 import OnboardingModal from './components/OnboardingModal';
 import { translations } from './utils/i18n';
+import { loginWithBackend } from './utils/auth';
 import { 
   initTelegram, 
   getInitialTheme, 
@@ -22,9 +24,21 @@ export default function App() {
     return localStorage.getItem('oqila_lang') || 'ru';
   });
   const [theme, setTheme] = useState(getInitialTheme);
-  const [activeTab, setActiveTab] = useState('studio');
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      if (tab && ['studio', 'finance', 'uzum', 'legal', 'about'].includes(tab)) {
+        return tab;
+      }
+    } catch {}
+    return 'studio';
+  });
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [selectedHistoryCard, setSelectedHistoryCard] = useState(null);
+
+  // Authenticated User ID
+  const [userId, setUserId] = useState(null);
 
   // User Business Profile state & Onboarding
   const [profile, setProfile] = useState(() => {
@@ -40,6 +54,25 @@ export default function App() {
   const [isOnboardingTourOpen, setIsOnboardingTourOpen] = useState(() => {
     return !localStorage.getItem('oqila_onboarded');
   });
+
+  // Authenticate user with database upon launch
+  useEffect(() => {
+    loginWithBackend(profile).then((authRes) => {
+      if (authRes && authRes.profile) {
+        setUserId(authRes.user_id);
+        const serverProfile = authRes.profile;
+        setProfile((prev) => {
+          const merged = { ...(prev || {}), ...serverProfile };
+          localStorage.setItem('oqila_profile', JSON.stringify(merged));
+          return merged;
+        });
+        if (serverProfile.lang && ['ru', 'uz'].includes(serverProfile.lang)) {
+          setLang(serverProfile.lang);
+          localStorage.setItem('oqila_lang', serverProfile.lang);
+        }
+      }
+    });
+  }, []);
 
   // Check if first-time onboarding is needed (runs once on first bot launch)
   useEffect(() => {
@@ -117,6 +150,7 @@ export default function App() {
             lang={lang} 
             t={t} 
             profile={profile}
+            userId={userId}
             onOpenHistory={() => setIsHistoryOpen(true)}
             externalCardToLoad={selectedHistoryCard}
           />
@@ -130,6 +164,14 @@ export default function App() {
               setIsOnboarding(false);
               setIsProfileOpen(true);
             }}
+          />
+        </div>
+        <div style={{ display: activeTab === 'uzum' ? 'block' : 'none' }}>
+          <TabUzum 
+            lang={lang} 
+            t={t} 
+            profile={profile}
+            onOpenCalculator={() => setActiveTab('finance')}
           />
         </div>
         <div style={{ display: activeTab === 'legal' ? 'block' : 'none' }}>
@@ -159,6 +201,7 @@ export default function App() {
       <HistoryModal
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
+        userId={userId}
         onSelectCard={(card) => {
           setSelectedHistoryCard(card);
           setActiveTab('studio');
@@ -182,6 +225,7 @@ export default function App() {
         onClose={() => setIsProfileOpen(false)}
         isOnboarding={isOnboarding}
         profile={profile}
+        userId={userId}
         onSave={handleSaveProfile}
         lang={lang}
         t={t}

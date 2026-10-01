@@ -1,11 +1,12 @@
 import React from 'react';
-import { Sparkles, Calculator, Scale, Info } from 'lucide-react';
+import { Sparkles, Calculator, ShoppingBag, Scale, Info } from 'lucide-react';
 import { hapticImpact } from '../utils/telegram';
 
 export default function BottomNav({ activeTab, setActiveTab, t }) {
   const tabs = [
     { id: 'studio', label: t.nav_studio, icon: Sparkles },
     { id: 'finance', label: t.nav_finance, icon: Calculator },
+    { id: 'uzum', label: t.nav_uzum, icon: ShoppingBag },
     { id: 'legal', label: t.nav_legal, icon: Scale },
     { id: 'about', label: t.nav_about, icon: Info },
   ];

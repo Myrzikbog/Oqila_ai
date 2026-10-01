@@ -146,7 +146,9 @@ class AIService:
         try:
             return asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.get_event_loop()
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
 
     @property
     def is_mock(self) -> bool:
