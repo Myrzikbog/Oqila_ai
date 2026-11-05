@@ -66,10 +66,12 @@ sudo certbot --nginx -d your-domain.com
 ```
 
 ### Привязка Telegram Webhook:
-После получения HTTPS домена зарегистрируйте вебхук бота одной командой:
+Если в `.env` задан `WEBAPP_URL`, вебхук регистрируется автоматически при старте сервера.
+Вручную (только для администратора, ключ из `ADMIN_SECRET_KEY`):
 ```bash
-curl -X POST "https://your-domain.com/api/set-webhook" -H "Content-Type: application/json" -d '{"url":"https://your-domain.com"}'
+curl -X POST "https://your-domain.com/api/set-webhook" -H "Content-Type: application/json" -H "X-Admin-Key: $ADMIN_SECRET_KEY" -d '{"url":"https://your-domain.com"}'
 ```
+Каждое обновление от Telegram проверяется по секрету `X-Telegram-Bot-Api-Secret-Token`.
 
 ---
 
@@ -101,8 +103,36 @@ GEMINI_API_KEY=your_gemini_api_key_here
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 AI_MODE=gemini
 WEBAPP_URL=https://your-domain.com   # (укажите при деплое на VDS)
+ADMIN_SECRET_KEY=...                 # ключ админ-панели, минимум 16 символов
+SESSION_SECRET=...                   # подпись сессий пользователей
+TELEGRAM_WEBHOOK_SECRET=...          # секрет вебхука Telegram
+ADMIN_TELEGRAM_IDS=123456789         # Telegram id администраторов (вход в /admin без ключа)
+ALLOW_GUEST_LOGIN=1                  # 0 — пускать только из Telegram
 HOST=0.0.0.0
 PORT=8000
+```
+`deploy.sh` сам генерирует `ADMIN_SECRET_KEY`, `SESSION_SECRET` и `TELEGRAM_WEBHOOK_SECRET`, если они пустые.
+Полный список — в `.env.example`.
+
+---
+
+## 🔒 Безопасность
+
+- **Вход.** В Telegram пользователь определяется только по подписанному `initData` (проверка HMAC и срока давности).
+  В обычном браузере сервер создаёт гостевой аккаунт. После входа выдаётся подписанный токен сессии,
+  и все пользовательские API берут `user_id` из него, а не из запроса.
+- **Изоляция данных.** История карточек, фото, профиль и все данные Uzum (ключ API, магазины, заказы,
+  остатки, уведомления) хранятся отдельно для каждого пользователя.
+- **Админ-панель** (`/admin`): заголовок `X-Admin-Key` с `ADMIN_SECRET_KEY` или Telegram-аккаунт
+  администратора (`ADMIN_TELEGRAM_IDS` или `/admin <ключ>` в боте). Ключ никогда не передаётся в URL.
+  Без `ADMIN_SECRET_KEY` вход по ключу отключён.
+- Uvicorn слушает только `127.0.0.1`, наружу сервис открыт через nginx с HTTPS.
+
+## 🧪 Тесты
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
 ---

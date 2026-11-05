@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("oqila_db")
 
-DB_PATH = Path(__file__).parent.parent / "oqila_ai.db"
+DB_PATH = Path(os.getenv("OQILA_DB_PATH") or (Path(__file__).parent.parent / "oqila_ai.db"))
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -27,6 +27,29 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 _db_initialized = False
+
+_UZUM_TABLES = (
+    "uzum_order_items",
+    "uzum_orders",
+    "uzum_stocks",
+    "uzum_shops",
+    "uzum_notifications_log",
+    "uzum_settings",
+)
+
+
+def _migrate_uzum_to_multi_tenant(cursor: sqlite3.Cursor) -> None:
+    """Drop legacy single-tenant Uzum tables (one global shop shared by every user).
+
+    The legacy tables have no owner column, so their rows cannot be attributed to a user.
+    They only hold a cache of Uzum API data (re-synced on connect), so they are recreated empty.
+    """
+    cursor.execute("PRAGMA table_info(uzum_settings)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if columns and "user_id" not in columns:
+        logger.warning("Migrating legacy single-tenant Uzum tables to per-user schema (cached data is reset).")
+        for table in _UZUM_TABLES:
+            cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
 
 def init_db(force: bool = False) -> None:
@@ -103,12 +126,6 @@ def init_db(force: bool = False) -> None:
             except Exception:
                 pass
 
-            for table in ("generated_cards", "usage_logs", "bot_subscribers"):
-                try:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(user_id)")
-                except Exception:
-                    pass
-
             # Bot subscribers for daily tips and tax reminders
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bot_subscribers (
@@ -120,12 +137,20 @@ def init_db(force: bool = False) -> None:
                 )
             """)
 
+            # Soft migration: link entities to users (after all three tables exist)
+            for table in ("generated_cards", "usage_logs", "bot_subscribers"):
+                try:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(user_id)")
+                except Exception:
+                    pass
+
             # ---------------------------------------------------------------
-            # Uzum Market Tables (Multi-Shop, Orders, Stocks, Notifications)
+            # Uzum Market Tables (per-user: every row is owned by users.user_id)
             # ---------------------------------------------------------------
+            _migrate_uzum_to_multi_tenant(cursor)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS uzum_settings (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    user_id INTEGER PRIMARY KEY REFERENCES users(user_id),
                     api_key TEXT,
                     is_connected INTEGER DEFAULT 0,
                     is_demo INTEGER DEFAULT 0,
@@ -135,26 +160,25 @@ def init_db(force: bool = False) -> None:
                     last_sync_at TIMESTAMP
                 )
             """)
-            cursor.execute("""
-                INSERT OR IGNORE INTO uzum_settings (id, is_connected, is_demo, notifications_enabled, low_stock_threshold)
-                VALUES (1, 0, 0, 1, 3)
-            """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS uzum_shops (
-                    shop_id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    shop_id INTEGER NOT NULL,
                     title TEXT NOT NULL,
                     legal_name TEXT,
                     inn TEXT,
                     status TEXT DEFAULT 'ACTIVE',
                     is_selected INTEGER DEFAULT 0,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, shop_id)
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS uzum_orders (
-                    order_id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    order_id INTEGER NOT NULL,
                     shop_id INTEGER NOT NULL,
                     shop_title TEXT,
                     posting_number TEXT,
@@ -168,25 +192,29 @@ def init_db(force: bool = False) -> None:
                     created_at TIMESTAMP,
                     deadline_to_confirm TIMESTAMP,
                     is_notified INTEGER DEFAULT 0,
-                    raw_json TEXT
+                    raw_json TEXT,
+                    PRIMARY KEY (user_id, order_id)
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS uzum_order_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
                     order_id INTEGER NOT NULL,
                     sku_id INTEGER NOT NULL,
                     product_title TEXT NOT NULL,
                     quantity INTEGER DEFAULT 1,
                     price REAL DEFAULT 0,
-                    barcode TEXT
+                    barcode TEXT,
+                    UNIQUE (user_id, order_id, sku_id)
                 )
             """)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS uzum_stocks (
-                    sku_id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    sku_id INTEGER NOT NULL,
                     shop_id INTEGER NOT NULL,
                     shop_title TEXT,
                     product_title TEXT NOT NULL,
@@ -197,24 +225,15 @@ def init_db(force: bool = False) -> None:
                     cost_price REAL DEFAULT 0,
                     fbo_stock INTEGER DEFAULT 0,
                     daily_sales_velocity REAL DEFAULT 1.5,
-                    last_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    last_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, sku_id)
                 )
             """)
-
-            # Soft migrations for existing tables
-            for col, col_def in [
-                ("cost_price", "REAL DEFAULT 0"),
-                ("fbo_stock", "INTEGER DEFAULT 0"),
-                ("daily_sales_velocity", "REAL DEFAULT 1.5"),
-            ]:
-                try:
-                    cursor.execute(f"ALTER TABLE uzum_stocks ADD COLUMN {col} {col_def}")
-                except Exception:
-                    pass
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS uzum_notifications_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
                     event_type TEXT NOT NULL,
                     shop_id INTEGER,
                     order_id INTEGER,
@@ -238,7 +257,7 @@ def init_db(force: bool = False) -> None:
                 CREATE INDEX IF NOT EXISTS idx_card_fav ON generated_cards(is_favorite);
             """)
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_uzum_orders_shop ON uzum_orders(shop_id);
+                CREATE INDEX IF NOT EXISTS idx_uzum_orders_shop ON uzum_orders(user_id, shop_id);
             """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_uzum_orders_status ON uzum_orders(status);
@@ -247,7 +266,7 @@ def init_db(force: bool = False) -> None:
                 CREATE INDEX IF NOT EXISTS idx_uzum_orders_notified ON uzum_orders(is_notified);
             """)
             cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_uzum_stocks_shop ON uzum_stocks(shop_id);
+                CREATE INDEX IF NOT EXISTS idx_uzum_stocks_shop ON uzum_stocks(user_id, shop_id);
             """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_users_tg_id ON users(tg_id);
@@ -432,7 +451,7 @@ def get_history(
                 params.extend([kw, kw, kw, kw])
             
             query += " ORDER BY is_favorite DESC, id DESC LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
+            params.extend([max(1, min(int(limit), 200)), max(0, int(offset))])
 
             cursor.execute(query, tuple(params))
             items = []
@@ -491,12 +510,15 @@ def get_history_count(favorites_only: bool = False, search: str = "", user_id: O
         return 0
 
 
-def toggle_favorite(card_id: int) -> Optional[bool]:
-    """Toggle the is_favorite state of a card. Returns the new state, or None on failure."""
+def toggle_favorite(card_id: int, user_id: int) -> Optional[bool]:
+    """Toggle the is_favorite state of the user's card. Returns the new state, or None if not found."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT is_favorite FROM generated_cards WHERE id = ?", (card_id,))
+            cursor.execute(
+                "SELECT is_favorite FROM generated_cards WHERE id = ? AND user_id = ?",
+                (card_id, user_id),
+            )
             row = cursor.fetchone()
             if not row:
                 return None
@@ -561,12 +583,12 @@ def get_subscribers() -> List[Dict[str, Any]]:
         return []
 
 
-def delete_history_item(card_id: int) -> bool:
-    """Delete a generated card by ID from history."""
+def delete_history_item(card_id: int, user_id: int) -> bool:
+    """Delete one of the user's generated cards from history."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM generated_cards WHERE id = ?", (card_id,))
+            cursor.execute("DELETE FROM generated_cards WHERE id = ? AND user_id = ?", (card_id, user_id))
             conn.commit()
             return cursor.rowcount > 0
     except Exception as exc:
@@ -574,12 +596,12 @@ def delete_history_item(card_id: int) -> bool:
         return False
 
 
-def clear_history() -> bool:
-    """Clear all generated cards from history."""
+def clear_history(user_id: int) -> bool:
+    """Clear the user's generated cards from history (other users' cards are untouched)."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM generated_cards")
+            cursor.execute("DELETE FROM generated_cards WHERE user_id = ?", (user_id,))
             conn.commit()
             return True
     except Exception as exc:
@@ -1135,7 +1157,7 @@ def get_admin_cards(
                 query += " AND c.user_id = ?"
                 params.append(user_id)
             query += " ORDER BY c.id DESC LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
+            params.extend([max(1, min(int(limit), 200)), max(0, int(offset))])
 
             cursor.execute(query, tuple(params))
             items = []
@@ -1169,30 +1191,15 @@ def get_admin_cards(
         return []
 
 
+
+
 # ===========================================================================
-# Uzum Market Data Access Layer (Multi-Shop, Orders, Stocks, Notifications)
+# Uzum Market Data Access Layer (per-user: every function is scoped by user_id)
 # ===========================================================================
 
-def get_uzum_settings() -> Dict[str, Any]:
-    """Retrieve current Uzum API integration settings."""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM uzum_settings WHERE id = 1")
-            row = cursor.fetchone()
-            if row:
-                d = dict(row)
-                # Mask API key if present
-                raw_key = d.get("api_key") or ""
-                if raw_key and len(raw_key) > 8:
-                    d["masked_key"] = raw_key[:4] + "••••••••" + raw_key[-4:]
-                else:
-                    d["masked_key"] = raw_key
-                return d
-    except Exception as exc:
-        logger.error("Failed to get uzum settings: %s", exc)
+def _default_uzum_settings(user_id: int) -> Dict[str, Any]:
     return {
-        "id": 1,
+        "user_id": user_id,
         "api_key": "",
         "masked_key": "",
         "is_connected": 0,
@@ -1204,7 +1211,71 @@ def get_uzum_settings() -> Dict[str, Any]:
     }
 
 
+def _mask_key(raw_key: str) -> str:
+    if not raw_key:
+        return ""
+    if len(raw_key) > 8:
+        return raw_key[:4] + "••••••••" + raw_key[-4:]
+    return "••••••••"
+
+
+def get_uzum_settings(user_id: int, include_secret: bool = False) -> Dict[str, Any]:
+    """Retrieve a user's Uzum API integration settings.
+
+    The raw API key is only returned when include_secret=True (server-side use);
+    responses to clients carry masked_key only.
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM uzum_settings WHERE user_id = ?", (user_id,))
+            row = cursor.fetchone()
+            if row:
+                d = dict(row)
+                raw_key = d.get("api_key") or ""
+                d["masked_key"] = _mask_key(raw_key)
+                if not include_secret:
+                    d.pop("api_key", None)
+                return d
+    except Exception as exc:
+        logger.error("Failed to get uzum settings: %s", exc)
+    d = _default_uzum_settings(user_id)
+    if not include_secret:
+        d.pop("api_key", None)
+    return d
+
+
+def get_connected_uzum_user_ids() -> List[int]:
+    """Return ids of users with a live (non-demo) Uzum connection, for background sync."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id FROM uzum_settings WHERE is_connected = 1 "
+                "AND (is_demo = 0 OR is_demo IS NULL) AND api_key IS NOT NULL AND api_key != ''"
+            )
+            return [int(r["user_id"]) for r in cursor.fetchall()]
+    except Exception as exc:
+        logger.error("Failed to list connected uzum users: %s", exc)
+        return []
+
+
+def get_uzum_notifiable_user_ids() -> List[int]:
+    """Return ids of users with an Uzum connection (live or demo) and notifications enabled."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id FROM uzum_settings WHERE is_connected = 1 AND notifications_enabled = 1"
+            )
+            return [int(r["user_id"]) for r in cursor.fetchall()]
+    except Exception as exc:
+        logger.error("Failed to list notifiable uzum users: %s", exc)
+        return []
+
+
 def save_uzum_settings(
+    user_id: int,
     api_key: Optional[str] = None,
     is_connected: Optional[int] = None,
     is_demo: Optional[int] = None,
@@ -1213,27 +1284,38 @@ def save_uzum_settings(
     telegram_chat_id: Optional[int] = None,
     last_sync_at: Optional[str] = None,
 ) -> bool:
-    """Update Uzum integration settings."""
+    """Create or update a user's Uzum integration settings."""
     try:
-        current = get_uzum_settings()
-        new_key = api_key if api_key is not None else current.get("api_key")
-        new_connected = is_connected if is_connected is not None else current.get("is_connected", 0)
-        new_demo = is_demo if is_demo is not None else current.get("is_demo", 0)
-        new_notify = notifications_enabled if notifications_enabled is not None else current.get("notifications_enabled", 1)
-        new_thresh = low_stock_threshold if low_stock_threshold is not None else current.get("low_stock_threshold", 3)
-        new_chat_id = telegram_chat_id if telegram_chat_id is not None else current.get("telegram_chat_id")
-        new_sync = last_sync_at if last_sync_at is not None else current.get("last_sync_at")
-
+        current = get_uzum_settings(user_id, include_secret=True)
+        values = (
+            user_id,
+            api_key if api_key is not None else current.get("api_key"),
+            is_connected if is_connected is not None else current.get("is_connected", 0),
+            is_demo if is_demo is not None else current.get("is_demo", 0),
+            notifications_enabled if notifications_enabled is not None else current.get("notifications_enabled", 1),
+            low_stock_threshold if low_stock_threshold is not None else current.get("low_stock_threshold", 3),
+            telegram_chat_id if telegram_chat_id is not None else current.get("telegram_chat_id"),
+            last_sync_at if last_sync_at is not None else current.get("last_sync_at"),
+        )
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                UPDATE uzum_settings
-                SET api_key = ?, is_connected = ?, is_demo = ?, notifications_enabled = ?,
-                    low_stock_threshold = ?, telegram_chat_id = ?, last_sync_at = ?
-                WHERE id = 1
+                INSERT INTO uzum_settings (
+                    user_id, api_key, is_connected, is_demo, notifications_enabled,
+                    low_stock_threshold, telegram_chat_id, last_sync_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    api_key = excluded.api_key,
+                    is_connected = excluded.is_connected,
+                    is_demo = excluded.is_demo,
+                    notifications_enabled = excluded.notifications_enabled,
+                    low_stock_threshold = excluded.low_stock_threshold,
+                    telegram_chat_id = excluded.telegram_chat_id,
+                    last_sync_at = excluded.last_sync_at
                 """,
-                (new_key, new_connected, new_demo, new_notify, new_thresh, new_chat_id, new_sync),
+                values,
             )
             conn.commit()
             return True
@@ -1242,38 +1324,43 @@ def save_uzum_settings(
         return False
 
 
-def get_uzum_shops() -> List[Dict[str, Any]]:
-    """Retrieve all seller shops belonging to the connected account."""
+def get_uzum_shops(user_id: int) -> List[Dict[str, Any]]:
+    """Retrieve all seller shops belonging to the user's connected account."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT s.*,
                        COALESCE((
                            SELECT COUNT(*)
                            FROM uzum_orders o
-                           WHERE o.shop_id = s.shop_id AND o.status IN ('CREATED', 'PENDING')
+                           WHERE o.user_id = s.user_id AND o.shop_id = s.shop_id
+                             AND o.status IN ('CREATED', 'PENDING')
                        ), 0) AS pending_orders_count
                 FROM uzum_shops s
+                WHERE s.user_id = ?
                 ORDER BY s.shop_id ASC
-            """)
+                """,
+                (user_id,),
+            )
             return [dict(r) for r in cursor.fetchall()]
     except Exception as exc:
         logger.error("Failed to get uzum shops: %s", exc)
         return []
 
 
-def save_uzum_shops(shops: List[Dict[str, Any]]) -> bool:
-    """Save or update list of shops from Uzum API."""
+def save_uzum_shops(user_id: int, shops: List[Dict[str, Any]]) -> bool:
+    """Save or update the user's list of shops from Uzum API."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             for s in shops:
                 cursor.execute(
                     """
-                    INSERT INTO uzum_shops (shop_id, title, legal_name, inn, status, is_selected, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(shop_id) DO UPDATE SET
+                    INSERT INTO uzum_shops (user_id, shop_id, title, legal_name, inn, status, is_selected, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id, shop_id) DO UPDATE SET
                         title = excluded.title,
                         legal_name = excluded.legal_name,
                         inn = excluded.inn,
@@ -1281,6 +1368,7 @@ def save_uzum_shops(shops: List[Dict[str, Any]]) -> bool:
                         updated_at = CURRENT_TIMESTAMP
                     """,
                     (
+                        user_id,
                         s["shop_id"],
                         s["title"],
                         s.get("legal_name", ""),
@@ -1296,17 +1384,27 @@ def save_uzum_shops(shops: List[Dict[str, Any]]) -> bool:
         return False
 
 
+def _attach_order_items(cursor: sqlite3.Cursor, user_id: int, orders: List[Dict[str, Any]]) -> None:
+    for o in orders:
+        cursor.execute(
+            "SELECT * FROM uzum_order_items WHERE user_id = ? AND order_id = ? ORDER BY id ASC",
+            (user_id, o["order_id"]),
+        )
+        o["items"] = [dict(item) for item in cursor.fetchall()]
+
+
 def get_uzum_orders(
+    user_id: int,
     shop_id: Optional[int] = None,
     status: Optional[str] = None,
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
-    """Retrieve orders with filtering by shop_id and status, including nested items."""
+    """Retrieve the user's orders filtered by shop_id and status, including nested items."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            query = "SELECT * FROM uzum_orders WHERE 1=1"
-            params: List[Any] = []
+            query = "SELECT * FROM uzum_orders WHERE user_id = ?"
+            params: List[Any] = [user_id]
             if shop_id and shop_id != 0:
                 query += " AND shop_id = ?"
                 params.append(shop_id)
@@ -1314,26 +1412,39 @@ def get_uzum_orders(
                 query += " AND status = ?"
                 params.append(status)
             query += " ORDER BY created_at DESC LIMIT ?"
-            params.append(limit)
+            params.append(max(1, min(int(limit), 500)))
 
             cursor.execute(query, params)
             orders = [dict(r) for r in cursor.fetchall()]
-
-            # Fetch items for each order
-            for o in orders:
-                cursor.execute(
-                    "SELECT * FROM uzum_order_items WHERE order_id = ? ORDER BY id ASC",
-                    (o["order_id"],),
-                )
-                o["items"] = [dict(item) for item in cursor.fetchall()]
+            _attach_order_items(cursor, user_id, orders)
             return orders
     except Exception as exc:
         logger.error("Failed to get uzum orders: %s", exc)
         return []
 
 
-def save_uzum_orders(orders: List[Dict[str, Any]]) -> bool:
-    """Save or update Uzum orders and their items."""
+def get_uzum_order(user_id: int, order_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieve a single order owned by the user (None if it does not exist or belongs to someone else)."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM uzum_orders WHERE user_id = ? AND order_id = ?",
+                (user_id, order_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            orders = [dict(row)]
+            _attach_order_items(cursor, user_id, orders)
+            return orders[0]
+    except Exception as exc:
+        logger.error("Failed to get uzum order: %s", exc)
+        return None
+
+
+def save_uzum_orders(user_id: int, orders: List[Dict[str, Any]]) -> bool:
+    """Save or update the user's Uzum orders and their items."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -1341,13 +1452,13 @@ def save_uzum_orders(orders: List[Dict[str, Any]]) -> bool:
                 cursor.execute(
                     """
                     INSERT INTO uzum_orders (
-                        order_id, shop_id, shop_title, posting_number, status,
+                        user_id, order_id, shop_id, shop_title, posting_number, status,
                         status_label_ru, status_label_uz, total_amount, delivery_type,
                         customer_name, delivery_city, created_at, deadline_to_confirm,
                         is_notified, raw_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(order_id) DO UPDATE SET
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, order_id) DO UPDATE SET
                         status = excluded.status,
                         status_label_ru = excluded.status_label_ru,
                         status_label_uz = excluded.status_label_uz,
@@ -1355,6 +1466,7 @@ def save_uzum_orders(orders: List[Dict[str, Any]]) -> bool:
                         deadline_to_confirm = excluded.deadline_to_confirm
                     """,
                     (
+                        user_id,
                         o["order_id"],
                         o["shop_id"],
                         o.get("shop_title", ""),
@@ -1372,17 +1484,17 @@ def save_uzum_orders(orders: List[Dict[str, Any]]) -> bool:
                         json.dumps(o.get("raw_json", {}), ensure_ascii=False),
                     ),
                 )
-                # Insert items if provided
                 if "items" in o and isinstance(o["items"], list):
                     for item in o["items"]:
                         cursor.execute(
                             """
                             INSERT OR IGNORE INTO uzum_order_items (
-                                order_id, sku_id, product_title, quantity, price, barcode
+                                user_id, order_id, sku_id, product_title, quantity, price, barcode
                             )
-                            VALUES (?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
+                                user_id,
                                 o["order_id"],
                                 item["sku_id"],
                                 item["product_title"],
@@ -1399,12 +1511,13 @@ def save_uzum_orders(orders: List[Dict[str, Any]]) -> bool:
 
 
 def update_uzum_order_status(
+    user_id: int,
     order_id: int,
     new_status: str,
     status_label_ru: Optional[str] = None,
     status_label_uz: Optional[str] = None,
 ) -> bool:
-    """Update order status (e.g. after confirming or cancelling)."""
+    """Update the status of one of the user's orders (e.g. after confirming or cancelling)."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -1414,9 +1527,9 @@ def update_uzum_order_status(
                 SET status = ?,
                     status_label_ru = COALESCE(?, status_label_ru),
                     status_label_uz = COALESCE(?, status_label_uz)
-                WHERE order_id = ?
+                WHERE user_id = ? AND order_id = ?
                 """,
-                (new_status, status_label_ru, status_label_uz, order_id),
+                (new_status, status_label_ru, status_label_uz, user_id, order_id),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -1425,35 +1538,32 @@ def update_uzum_order_status(
         return False
 
 
-def get_unnotified_uzum_orders() -> List[Dict[str, Any]]:
-    """Retrieve all pending orders that have not yet sent a Telegram push notification."""
+def get_unnotified_uzum_orders(user_id: int) -> List[Dict[str, Any]]:
+    """Retrieve the user's pending orders that have not yet sent a Telegram push notification."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM uzum_orders WHERE is_notified = 0 AND status IN ('CREATED', 'PENDING') ORDER BY created_at ASC"
+                "SELECT * FROM uzum_orders WHERE user_id = ? AND is_notified = 0 "
+                "AND status IN ('CREATED', 'PENDING') ORDER BY created_at ASC",
+                (user_id,),
             )
             orders = [dict(r) for r in cursor.fetchall()]
-            for o in orders:
-                cursor.execute(
-                    "SELECT * FROM uzum_order_items WHERE order_id = ?",
-                    (o["order_id"],),
-                )
-                o["items"] = [dict(item) for item in cursor.fetchall()]
+            _attach_order_items(cursor, user_id, orders)
             return orders
     except Exception as exc:
         logger.error("Failed to get unnotified orders: %s", exc)
         return []
 
 
-def mark_order_notified(order_id: int) -> bool:
-    """Flag an order as having been notified in Telegram."""
+def mark_order_notified(user_id: int, order_id: int) -> bool:
+    """Flag one of the user's orders as having been notified in Telegram."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE uzum_orders SET is_notified = 1 WHERE order_id = ?",
-                (order_id,),
+                "UPDATE uzum_orders SET is_notified = 1 WHERE user_id = ? AND order_id = ?",
+                (user_id, order_id),
             )
             conn.commit()
             return True
@@ -1462,19 +1572,21 @@ def mark_order_notified(order_id: int) -> bool:
         return False
 
 
-def get_uzum_stocks(shop_id: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Retrieve SKU stock balances and prices."""
+def get_uzum_stocks(user_id: int, shop_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Retrieve the user's SKU stock balances and prices."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             if shop_id and shop_id != 0:
                 cursor.execute(
-                    "SELECT * FROM uzum_stocks WHERE shop_id = ? ORDER BY is_low_stock DESC, current_stock ASC",
-                    (shop_id,),
+                    "SELECT * FROM uzum_stocks WHERE user_id = ? AND shop_id = ? "
+                    "ORDER BY is_low_stock DESC, current_stock ASC",
+                    (user_id, shop_id),
                 )
             else:
                 cursor.execute(
-                    "SELECT * FROM uzum_stocks ORDER BY is_low_stock DESC, current_stock ASC"
+                    "SELECT * FROM uzum_stocks WHERE user_id = ? ORDER BY is_low_stock DESC, current_stock ASC",
+                    (user_id,),
                 )
             return [dict(r) for r in cursor.fetchall()]
     except Exception as exc:
@@ -1482,8 +1594,8 @@ def get_uzum_stocks(shop_id: Optional[int] = None) -> List[Dict[str, Any]]:
         return []
 
 
-def save_uzum_stocks(stocks: List[Dict[str, Any]]) -> bool:
-    """Upsert stock items with FBO/FBS stocks and cost prices."""
+def save_uzum_stocks(user_id: int, stocks: List[Dict[str, Any]]) -> bool:
+    """Upsert the user's stock items with FBO/FBS stocks and cost prices."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -1495,11 +1607,11 @@ def save_uzum_stocks(stocks: List[Dict[str, Any]]) -> bool:
                 cursor.execute(
                     """
                     INSERT INTO uzum_stocks (
-                        sku_id, shop_id, shop_title, product_title, barcode,
+                        user_id, sku_id, shop_id, shop_title, product_title, barcode,
                         current_stock, price, is_low_stock, cost_price, fbo_stock, daily_sales_velocity, last_synced_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(sku_id) DO UPDATE SET
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id, sku_id) DO UPDATE SET
                         current_stock = excluded.current_stock,
                         price = excluded.price,
                         is_low_stock = excluded.is_low_stock,
@@ -1509,6 +1621,7 @@ def save_uzum_stocks(stocks: List[Dict[str, Any]]) -> bool:
                         last_synced_at = CURRENT_TIMESTAMP
                     """,
                     (
+                        user_id,
                         s["sku_id"],
                         s["shop_id"],
                         s.get("shop_title", ""),
@@ -1529,70 +1642,41 @@ def save_uzum_stocks(stocks: List[Dict[str, Any]]) -> bool:
         return False
 
 
-def update_uzum_stock_amount(sku_id: int, new_amount: int) -> bool:
-    """Update stock quantity for a single SKU."""
-    try:
-        is_low = 1 if new_amount <= 3 else 0
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE uzum_stocks
-                SET current_stock = ?, is_low_stock = ?, last_synced_at = CURRENT_TIMESTAMP
-                WHERE sku_id = ?
-                """,
-                (new_amount, is_low, sku_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-    except Exception as exc:
-        logger.error("Failed to update stock amount: %s", exc)
-        return False
-
-
-def update_uzum_price(sku_id: int, new_price: float) -> bool:
-    """Update selling price for a single SKU."""
+def _update_stock_row(user_id: int, sku_id: int, set_clause: str, params: tuple) -> bool:
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
-                UPDATE uzum_stocks
-                SET price = ?, last_synced_at = CURRENT_TIMESTAMP
-                WHERE sku_id = ?
-                """,
-                (new_price, sku_id),
+                f"UPDATE uzum_stocks SET {set_clause}, last_synced_at = CURRENT_TIMESTAMP "
+                "WHERE user_id = ? AND sku_id = ?",
+                (*params, user_id, sku_id),
             )
             conn.commit()
             return cursor.rowcount > 0
     except Exception as exc:
-        logger.error("Failed to update stock price: %s", exc)
+        logger.error("Failed to update uzum stock row: %s", exc)
         return False
 
 
-def update_uzum_cost_price(sku_id: int, cost_price: float) -> bool:
-    """Update prime cost (tannarx) for a SKU to calculate net profit and margins accurately."""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                UPDATE uzum_stocks
-                SET cost_price = ?, last_synced_at = CURRENT_TIMESTAMP
-                WHERE sku_id = ?
-                """,
-                (cost_price, sku_id),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-    except Exception as exc:
-        logger.error("Failed to update cost price: %s", exc)
-        return False
+def update_uzum_stock_amount(user_id: int, sku_id: int, new_amount: int) -> bool:
+    """Update stock quantity for one of the user's SKUs."""
+    is_low = 1 if new_amount <= 3 else 0
+    return _update_stock_row(user_id, sku_id, "current_stock = ?, is_low_stock = ?", (new_amount, is_low))
 
 
-def get_uzum_margin_analytics(shop_id: Optional[int] = None) -> Dict[str, Any]:
+def update_uzum_price(user_id: int, sku_id: int, new_price: float) -> bool:
+    """Update selling price for one of the user's SKUs."""
+    return _update_stock_row(user_id, sku_id, "price = ?", (new_price,))
+
+
+def update_uzum_cost_price(user_id: int, sku_id: int, cost_price: float) -> bool:
+    """Update prime cost (tannarx) for one of the user's SKUs."""
+    return _update_stock_row(user_id, sku_id, "cost_price = ?", (cost_price,))
+
+
+def get_uzum_margin_analytics(user_id: int, shop_id: Optional[int] = None) -> Dict[str, Any]:
     """
-    Calculate unit economics and margin health for all SKUs:
+    Calculate unit economics and margin health for all of the user's SKUs:
     - Uzum commission (avg 13%)
     - Logistics fee (12,000 UZS)
     - 1% YaTT turnover tax
@@ -1601,7 +1685,7 @@ def get_uzum_margin_analytics(shop_id: Optional[int] = None) -> Dict[str, Any]:
     - Healthy (>=25%), Tight (10-24%), Danger (<10%)
     """
     try:
-        stocks = get_uzum_stocks(shop_id=shop_id)
+        stocks = get_uzum_stocks(user_id, shop_id=shop_id)
         analyzed_items = []
         healthy_cnt = 0
         tight_cnt = 0
@@ -1621,25 +1705,18 @@ def get_uzum_margin_analytics(shop_id: Optional[int] = None) -> Dict[str, Any]:
             net_profit = round(price - total_deductions)
             margin_pct = round((net_profit / max(1.0, price)) * 100, 1)
 
-            # Recommended break-even + profit price
-            # price * (1 - 0.14) >= cost + 12000 + 25000 (target profit 25k)
+            # Recommended price: price * (1 - 0.14) >= cost + logistics + target profit
             target_profit = max(20000.0, price * 0.2)
             recommended_price = round((cost + logistics + target_profit) / 0.86, -3)
 
             if margin_pct >= 25:
-                status = "HEALTHY"
-                status_ru = "Высокая прибыль"
-                status_uz = "Yuqori foyda"
+                status, status_ru, status_uz = "HEALTHY", "Высокая прибыль", "Yuqori foyda"
                 healthy_cnt += 1
             elif margin_pct >= 10:
-                status = "TIGHT"
-                status_ru = "Умеренная маржа"
-                status_uz = "O'rtacha marja"
+                status, status_ru, status_uz = "TIGHT", "Умеренная маржа", "O'rtacha marja"
                 tight_cnt += 1
             else:
-                status = "DANGER"
-                status_ru = "Опасность убытка!"
-                status_uz = "Zarar xavfi!"
+                status, status_ru, status_uz = "DANGER", "Опасность убытка!", "Zarar xavfi!"
                 danger_cnt += 1
 
             analyzed_items.append({
@@ -1681,9 +1758,9 @@ def get_uzum_margin_analytics(shop_id: Optional[int] = None) -> Dict[str, Any]:
         }
 
 
-def get_uzum_fbo_forecast(shop_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_uzum_fbo_forecast(user_id: int, shop_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Calculate restock forecast for FBO inventory:
+    Calculate restock forecast for the user's FBO inventory:
     - Current FBO warehouse stock
     - Daily sales rate
     - Days of stock remaining
@@ -1691,7 +1768,7 @@ def get_uzum_fbo_forecast(shop_id: Optional[int] = None) -> List[Dict[str, Any]]
     - Recommended reorder batch size
     """
     try:
-        stocks = get_uzum_stocks(shop_id=shop_id)
+        stocks = get_uzum_stocks(user_id, shop_id=shop_id)
         forecasts = []
         for s in stocks:
             fbo_stock = int(s.get("fbo_stock", s.get("current_stock", 0)))
@@ -1737,7 +1814,6 @@ def get_uzum_fbo_forecast(shop_id: Optional[int] = None) -> List[Dict[str, Any]]
                 "tip_uz": tip_uz,
             })
 
-        # Sort with most critical first
         forecasts.sort(key=lambda x: x["days_remaining"])
         return forecasts
     except Exception as exc:
@@ -1745,13 +1821,16 @@ def get_uzum_fbo_forecast(shop_id: Optional[int] = None) -> List[Dict[str, Any]]
         return []
 
 
-def get_uzum_finance_summary(shop_id: Optional[int] = None) -> Dict[str, Any]:
-    """Calculate consolidated or shop-specific revenue, commission, and net payout."""
+def get_uzum_finance_summary(user_id: int, shop_id: Optional[int] = None) -> Dict[str, Any]:
+    """Calculate the user's consolidated or shop-specific revenue, commission, and net payout."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            query = "SELECT SUM(total_amount) as gross, COUNT(*) as cnt FROM uzum_orders WHERE status NOT IN ('CANCELLED')"
-            params: List[Any] = []
+            query = (
+                "SELECT SUM(total_amount) as gross, COUNT(*) as cnt FROM uzum_orders "
+                "WHERE user_id = ? AND status NOT IN ('CANCELLED')"
+            )
+            params: List[Any] = [user_id]
             if shop_id and shop_id != 0:
                 query += " AND shop_id = ?"
                 params.append(shop_id)
@@ -1761,14 +1840,10 @@ def get_uzum_finance_summary(shop_id: Optional[int] = None) -> Dict[str, Any]:
             gross = float(row["gross"] or 0) if row else 0.0
             order_count = int(row["cnt"] or 0) if row else 0
 
-            # Commission approx: 14% on average in Uzum
-            commission_rate = 0.14
+            commission_rate = 0.14  # average Uzum commission
             commission_amount = round(gross * commission_rate)
-            # Logistics fee approx: 5 250 UZS per order
-            logistics_fee = order_count * 5250
-            # 1% turnover tax withheld by Uzum as tax agent
-            tax_turnover = round(gross * 0.01)
-            # Net payout
+            logistics_fee = order_count * 5250  # approx. logistics fee per order
+            tax_turnover = round(gross * 0.01)  # 1% turnover tax withheld by Uzum as tax agent
             net_payout = max(0.0, gross - commission_amount - logistics_fee - tax_turnover)
 
             return {
@@ -1794,6 +1869,7 @@ def get_uzum_finance_summary(shop_id: Optional[int] = None) -> Dict[str, Any]:
 
 
 def log_uzum_notification(
+    user_id: int,
     event_type: str,
     message: str,
     sent_to_chat_id: int,
@@ -1808,11 +1884,11 @@ def log_uzum_notification(
             cursor.execute(
                 """
                 INSERT INTO uzum_notifications_log (
-                    event_type, shop_id, order_id, message, sent_to_chat_id, status
+                    user_id, event_type, shop_id, order_id, message, sent_to_chat_id, status
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (event_type, shop_id, order_id, message, sent_to_chat_id, status),
+                (user_id, event_type, shop_id, order_id, message, sent_to_chat_id, status),
             )
             conn.commit()
             return True
@@ -1821,22 +1897,35 @@ def log_uzum_notification(
         return False
 
 
-def reset_uzum_data() -> bool:
-    """Reset all Uzum local tables for fresh sync."""
+def reset_uzum_data(user_id: int) -> bool:
+    """Reset the user's Uzum cached data for a fresh sync (other users are untouched)."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM uzum_order_items")
-            cursor.execute("DELETE FROM uzum_orders")
-            cursor.execute("DELETE FROM uzum_stocks")
-            cursor.execute("DELETE FROM uzum_shops")
-            cursor.execute("DELETE FROM uzum_notifications_log")
-            cursor.execute("UPDATE uzum_settings SET is_connected = 0, is_demo = 0, last_sync_at = NULL WHERE id = 1")
+            for table in ("uzum_order_items", "uzum_orders", "uzum_stocks", "uzum_shops", "uzum_notifications_log"):
+                cursor.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+            cursor.execute(
+                "UPDATE uzum_settings SET is_connected = 0, is_demo = 0, last_sync_at = NULL WHERE user_id = ?",
+                (user_id,),
+            )
             conn.commit()
             return True
     except Exception as exc:
         logger.error("Failed to reset uzum data: %s", exc)
         return False
+
+
+def disconnect_uzum(user_id: int) -> bool:
+    """Disconnect the user's Uzum account: clear cached data and forget the API key."""
+    ok = reset_uzum_data(user_id)
+    try:
+        with get_db_connection() as conn:
+            conn.execute("UPDATE uzum_settings SET api_key = NULL WHERE user_id = ?", (user_id,))
+            conn.commit()
+    except Exception as exc:
+        logger.error("Failed to clear uzum api key: %s", exc)
+        return False
+    return ok
 
 
 # Auto-initialize on module load

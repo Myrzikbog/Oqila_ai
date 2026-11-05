@@ -22,7 +22,10 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from services.database import (
+    get_connected_uzum_user_ids,
     get_uzum_finance_summary,
+    get_uzum_notifiable_user_ids,
+    get_uzum_order,
     get_uzum_orders,
     get_uzum_settings,
     get_uzum_shops,
@@ -335,6 +338,7 @@ class UzumService:
 
     async def connect_and_sync(
         self,
+        user_id: int,
         api_key: Optional[str] = None,
         is_demo: bool = False,
         telegram_chat_id: Optional[int] = None,
@@ -346,17 +350,18 @@ class UzumService:
         async with self._lock:
             if is_demo or not api_key:
                 logger.info("Initializing Uzum Service in DEMO mode.")
-                reset_uzum_data()
+                reset_uzum_data(user_id)
                 save_uzum_settings(
+                    user_id,
                     api_key="uzum_demo_live_token",
                     is_connected=1,
                     is_demo=1,
                     telegram_chat_id=telegram_chat_id,
                     last_sync_at=datetime.now().isoformat(),
                 )
-                save_uzum_shops(DEMO_SHOPS)
-                save_uzum_orders(DEMO_ORDERS)
-                save_uzum_stocks(DEMO_STOCKS)
+                save_uzum_shops(user_id, DEMO_SHOPS)
+                save_uzum_orders(user_id, DEMO_ORDERS)
+                save_uzum_stocks(user_id, DEMO_STOCKS)
                 return {
                     "status": "ok",
                     "mode": "demo",
@@ -407,20 +412,21 @@ class UzumService:
                             }]
 
                         # Clear demo data before saving real live shop
-                        reset_uzum_data()
+                        reset_uzum_data(user_id)
 
                         save_uzum_settings(
+                            user_id,
                             api_key=clean_key,
                             is_connected=1,
                             is_demo=0,
                             telegram_chat_id=telegram_chat_id,
                             last_sync_at=datetime.now().isoformat(),
                         )
-                        save_uzum_shops(shops_list)
+                        save_uzum_shops(user_id, shops_list)
                         logger.info("Successfully validated Uzum API key. Found %d shops.", len(shops_list))
 
                         # Proactively pull initial orders and stocks
-                        await self.sync_live_orders_and_stocks()
+                        await self.sync_live_orders_and_stocks(user_id)
 
                         return {
                             "status": "ok",
@@ -434,32 +440,44 @@ class UzumService:
                             "message": "Неверный API-токен Uzum (401/403 Unauthorized). Проверьте ключ в кабинете seller.uzum.uz",
                         }
                     else:
-                        logger.warning("Uzum /v1/shops returned status %s: %s", res.status_code, res.text)
+                        logger.warning("Uzum /v1/shops returned status %s: %s", res.status_code, res.text[:300])
                         return {
                             "status": "error",
-                            "message": f"Ошибка Uzum API ({res.status_code}): {res.text[:120]}",
+                            "message": f"Ошибка Uzum API ({res.status_code}). Попробуйте позже.",
                         }
             except Exception as exc:
                 logger.error("Failed to connect to Uzum API: %s", exc)
                 return {
                     "status": "error",
-                    "message": f"Не удалось подключиться к api-seller.uzum.uz: {str(exc)[:120]}",
+                    "message": "Не удалось подключиться к api-seller.uzum.uz. Попробуйте позже.",
                 }
 
-    async def sync_live_orders_and_stocks(self) -> None:
+    async def sync_all_users(self) -> None:
+        """Background job: sync every user with a live (non-demo) Uzum connection."""
+        for user_id in get_connected_uzum_user_ids():
+            await self.sync_live_orders_and_stocks(user_id)
+
+    async def notify_all_users(self) -> int:
+        """Background job: push pending new-order notifications for every connected user."""
+        total = 0
+        for user_id in get_uzum_notifiable_user_ids():
+            total += await self.check_and_send_notifications(user_id)
+        return total
+
+    async def sync_live_orders_and_stocks(self, user_id: int) -> None:
         """
         Fetch live orders and product stocks strictly following Uzum Seller OpenAPI 3.0.0:
         - GET /v2/fbs/orders with required shopIds query param across active statuses
         - GET /v3/fbs/sku/stocks with shopIds & page
         - GET /v1/product/shop/{shopId} for product catalog details
         """
-        settings = get_uzum_settings()
+        settings = get_uzum_settings(user_id, include_secret=True)
         api_key = settings.get("api_key")
         if not api_key or settings.get("is_demo"):
             return
 
         headers = self._get_headers(api_key)
-        shops = get_uzum_shops()
+        shops = get_uzum_shops(user_id)
         if not shops:
             return
         shop_map = {s["shop_id"]: s["title"] for s in shops}
@@ -553,7 +571,7 @@ class UzumService:
                         logger.debug("Error checking status %s: %s", st_query, st_exc)
 
                 if parsed_orders:
-                    save_uzum_orders(parsed_orders)
+                    save_uzum_orders(user_id, parsed_orders)
                     logger.info("Synchronized %d live orders from Uzum API.", len(parsed_orders))
 
                 # 2. Fetch stocks: /v3/fbs/sku/stocks
@@ -615,24 +633,27 @@ class UzumService:
                         logger.debug("Error pulling products for shop %s: %s", s_id, p_exc)
 
                 if parsed_stocks:
-                    save_uzum_stocks(parsed_stocks)
+                    save_uzum_stocks(user_id, parsed_stocks)
                     logger.info("Synchronized %d live stock records from Uzum API.", len(parsed_stocks))
 
-                save_uzum_settings(last_sync_at=datetime.now().isoformat())
+                save_uzum_settings(user_id, last_sync_at=datetime.now().isoformat())
         except Exception as exc:
             logger.warning("Live sync error: %s", exc)
 
-    async def confirm_order(self, order_id: int) -> Dict[str, Any]:
+    async def confirm_order(self, user_id: int, order_id: int) -> Dict[str, Any]:
         """
-        Confirm an FBS order (transitions from CREATED to CONFIRMED / PACKING).
+        Confirm one of the user's FBS orders (transitions from CREATED to CONFIRMED / PACKING).
         Calls POST /v1/fbs/order/{orderId}/confirm or simulates in Demo mode.
         """
-        settings = get_uzum_settings()
+        if not get_uzum_order(user_id, order_id):
+            return {"status": "error", "message": "Buyurtma topilmadi / Заказ не найден"}
+        settings = get_uzum_settings(user_id, include_secret=True)
         is_demo = bool(settings.get("is_demo"))
         api_key = settings.get("api_key")
 
         if is_demo or not api_key:
             update_uzum_order_status(
+                user_id,
                 order_id=order_id,
                 new_status="CONFIRMED",
                 status_label_ru="В сборке (Подтвержден)",
@@ -651,6 +672,7 @@ class UzumService:
                 res = await client.post(f"{UZUM_API_BASE}/v1/fbs/order/{order_id}/confirm", headers=headers)
                 if res.status_code in (200, 204):
                     update_uzum_order_status(
+                        user_id,
                         order_id=order_id,
                         new_status="CONFIRMED",
                         status_label_ru="В сборке (Подтвержден)",
@@ -665,22 +687,26 @@ class UzumService:
                 else:
                     return {
                         "status": "error",
-                        "message": f"Uzum API вернул ошибку при подтверждении ({res.status_code}): {res.text[:120]}",
+                        "message": f"Uzum API вернул ошибку при подтверждении ({res.status_code}).",
                     }
         except Exception as exc:
-            return {"status": "error", "message": f"Сетевая ошибка: {exc}"}
+            logger.warning("Uzum confirm network error: %s", exc)
+            return {"status": "error", "message": "Сетевая ошибка при обращении к Uzum API"}
 
-    async def cancel_order(self, order_id: int, reason: str = "Отсутствует на складе") -> Dict[str, Any]:
+    async def cancel_order(self, user_id: int, order_id: int, reason: str = "Отсутствует на складе") -> Dict[str, Any]:
         """
-        Cancel an FBS order via POST /v1/fbs/order/{orderId}/cancel.
+        Cancel one of the user's FBS orders via POST /v1/fbs/order/{orderId}/cancel.
         Validates reason enum ('OUT_OF_STOCK' or 'OTHER') as required by Uzum Seller OpenAPI.
         """
-        settings = get_uzum_settings()
+        if not get_uzum_order(user_id, order_id):
+            return {"status": "error", "message": "Buyurtma topilmadi / Заказ не найден"}
+        settings = get_uzum_settings(user_id, include_secret=True)
         is_demo = bool(settings.get("is_demo"))
         api_key = settings.get("api_key")
 
         if is_demo or not api_key:
             update_uzum_order_status(
+                user_id,
                 order_id=order_id,
                 new_status="CANCELLED",
                 status_label_ru="Отменён",
@@ -705,22 +731,28 @@ class UzumService:
                 )
                 if res.status_code in (200, 204):
                     update_uzum_order_status(
+                        user_id,
                         order_id=order_id,
                         new_status="CANCELLED",
                         status_label_ru="Отменён",
                         status_label_uz="Bekor qilindi",
                     )
                     return {"status": "ok", "order_id": order_id, "new_status": "CANCELLED"}
-                return {"status": "error", "message": f"Ошибка отмены ({res.status_code}): {res.text[:120]}"}
+                return {"status": "error", "message": f"Ошибка отмены ({res.status_code})"}
         except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+            logger.warning("Uzum cancel network error: %s", exc)
+            return {"status": "error", "message": "Сетевая ошибка при обращении к Uzum API"}
 
-    async def get_order_label(self, order_id: int, size: str = "LARGE") -> Dict[str, Any]:
+    async def get_order_label(self, user_id: int, order_id: int, size: str = "LARGE") -> Dict[str, Any]:
         """
-        Retrieve order label from Uzum OpenAPI: GET /v1/fbs/order/{orderId}/labels/print?size={size}
+        Retrieve the label of one of the user's orders: GET /v1/fbs/order/{orderId}/labels/print?size={size}
         size can be 'LARGE' (58x40mm) or 'BIG' (43x25mm).
         """
-        settings = get_uzum_settings()
+        o = get_uzum_order(user_id, order_id)
+        if not o:
+            return {"status": "error", "message": "Order not found"}
+        size = "LARGE" if size != "BIG" else "BIG"
+        settings = get_uzum_settings(user_id, include_secret=True)
         api_key = settings.get("api_key")
         is_demo = bool(settings.get("is_demo"))
 
@@ -739,41 +771,26 @@ class UzumService:
                 logger.warning("Failed to fetch label from Uzum API: %s", exc)
 
         # Fallback to local DB order metadata
-        orders = get_uzum_orders()
-        matching = [o for o in orders if o["order_id"] == order_id]
-        if matching:
-            o = matching[0]
-            return {
-                "status": "ok",
-                "order_id": order_id,
-                "posting_number": o.get("posting_number", str(order_id)),
-                "shop_title": o.get("shop_title", "Uzum Shop"),
-                "customer_name": o.get("customer_name", "Xaridor"),
-                "delivery_city": o.get("delivery_city", "Toshkent"),
-                "size": size,
-                "label_dimensions": "58x40 mm" if size == "LARGE" else "43x25 mm",
-            }
-        return {"status": "error", "message": "Order not found"}
+        return {
+            "status": "ok",
+            "order_id": order_id,
+            "posting_number": o.get("posting_number", str(order_id)),
+            "shop_title": o.get("shop_title", "Uzum Shop"),
+            "customer_name": o.get("customer_name", "Xaridor"),
+            "delivery_city": o.get("delivery_city", "Toshkent"),
+            "size": size,
+            "label_dimensions": "58x40 mm" if size == "LARGE" else "43x25 mm",
+        }
 
-    def generate_thermal_label_svg(self, order_id: int, size: str = "LARGE") -> str:
+    def generate_thermal_label_svg(self, user_id: int, order_id: int, size: str = "LARGE") -> str:
         """
         Generate a crisp vector SVG barcode thermal label (58x40 mm or 43x25 mm).
         Works 100% reliably in any environment without external binary C-libraries.
         """
         import random
-        orders = get_uzum_orders()
-        matching = [o for o in orders if o["order_id"] == order_id]
-        if matching:
-            o = matching[0]
-        else:
-            o = {
-                "order_id": order_id,
-                "posting_number": f"UZ-FBS-{order_id}",
-                "shop_title": "Oqila Do'kon",
-                "customer_name": "Xaridor",
-                "delivery_city": "Toshkent",
-                "items": [{"product_title": "Milliy mahsulot", "quantity": 1}],
-            }
+        o = get_uzum_order(user_id, order_id)
+        if not o:
+            return ""
 
         width = 580 if size == "LARGE" else 430
         height = 400 if size == "LARGE" else 250
@@ -827,7 +844,7 @@ class UzumService:
 </svg>"""
         return svg
 
-    def generate_thermal_label_image(self, order_id: int, size: str = "LARGE") -> bytes:
+    def generate_thermal_label_image(self, user_id: int, order_id: int, size: str = "LARGE") -> bytes:
         """
         Generate a crisp 203 DPI monochrome thermal label image (PNG) for Bluetooth & desktop printers:
         - 58x40 mm standard format (580x400 px) or 43x25 mm (430x250 px)
@@ -838,19 +855,9 @@ class UzumService:
             import io
             import random
 
-            orders = get_uzum_orders()
-            matching = [o for o in orders if o["order_id"] == order_id]
-            if matching:
-                o = matching[0]
-            else:
-                o = {
-                    "order_id": order_id,
-                    "posting_number": f"UZ-FBS-{order_id}",
-                    "shop_title": "Oqila Do'kon",
-                    "customer_name": "Xaridor",
-                    "delivery_city": "Toshkent",
-                    "items": [{"product_title": "Mahsulot", "quantity": 1}],
-                }
+            o = get_uzum_order(user_id, order_id)
+            if not o:
+                return b""
 
             width = 580 if size == "LARGE" else 430
             height = 400 if size == "LARGE" else 250
@@ -903,12 +910,12 @@ class UzumService:
             return buf.getvalue()
         except Exception as exc:
             logger.warning("Could not generate PNG via Pillow (%s), generating SVG bytes fallback", exc)
-            return self.generate_thermal_label_svg(order_id, size=size).encode("utf-8")
+            return self.generate_thermal_label_svg(user_id, order_id, size=size).encode("utf-8")
 
-    async def send_fbo_restock_alert(self, chat_id: int, sku_id: Optional[int] = None) -> bool:
+    async def send_fbo_restock_alert(self, user_id: int, chat_id: int, sku_id: Optional[int] = None) -> bool:
         """Send proactive Telegram push notification warning about imminent out-of-stock on Uzum FBO."""
         from services.database import get_uzum_fbo_forecast
-        forecasts = get_uzum_fbo_forecast()
+        forecasts = get_uzum_fbo_forecast(user_id)
         if not forecasts:
             return False
 
@@ -918,12 +925,12 @@ class UzumService:
         else:
             item = forecasts[0]
 
-        shop_name = item.get("shop_title") or "Uzum Do'kon"
-        prod_name = item.get("product_title") or "Mahsulot"
+        shop_name = html.escape(item.get("shop_title") or "Uzum Do'kon")
+        prod_name = html.escape(item.get("product_title") or "Mahsulot")
         days_left = int(item.get("days_remaining", 0))
         fbo_qty = item.get("fbo_stock", 0)
         velocity = item.get("daily_sales_velocity", 1.5)
-        tip_text = item.get("tip_uz", "")
+        tip_text = html.escape(item.get("tip_uz", ""))
         reorder_qty = item.get("recommended_reorder", 25)
 
         text = (
@@ -962,46 +969,35 @@ class UzumService:
             reply_markup=reply_markup,
         )
 
-    async def check_and_send_notifications(self) -> int:
+    async def check_and_send_notifications(self, user_id: int) -> int:
         """
-        Background task: checks for new orders with is_notified == 0
-        and sends high-priority Telegram push notifications with 1-click confirmation buttons.
+        Checks the user's new orders with is_notified == 0 and sends Telegram push notifications
+        with 1-click confirmation buttons to that user's own chat.
         """
-        settings = get_uzum_settings()
+        settings = get_uzum_settings(user_id)
         if not settings.get("notifications_enabled"):
             return 0
 
-        target_chat_id = settings.get("telegram_chat_id")
-        if not target_chat_id and os.getenv("TELEGRAM_ADMIN_CHAT_ID"):
-            try:
-                target_chat_id = int(os.getenv("TELEGRAM_ADMIN_CHAT_ID"))
-            except Exception:
-                pass
-
-        if not target_chat_id:
-            # Check subscribers table for any registered user
-            from services.database import get_subscribers
-            subs = get_subscribers()
-            if subs:
-                target_chat_id = subs[0]["chat_id"]
-
-        if not target_chat_id:
-            # Cannot dispatch without a recipient chat
+        from services.database import get_user
+        owner = get_user(user_id) or {}
+        target_chat_id = int(owner.get("tg_id") or 0)
+        if target_chat_id <= 0:
+            # Browser guests have no Telegram chat to notify
             return 0
 
-        unnotified = get_unnotified_uzum_orders()
+        unnotified = get_unnotified_uzum_orders(user_id)
         sent_count = 0
 
         for order in unnotified:
             oid = order["order_id"]
-            shop_title = order.get("shop_title") or f"Do'kon #{order.get('shop_id')}"
+            shop_title = html.escape(order.get("shop_title") or f"Do'kon #{order.get('shop_id')}")
             total = float(order.get("total_amount", 0))
             deadline = order.get("deadline_to_confirm", "")
 
             # Format items summary
             items_str = ""
             for item in order.get("items", []):
-                items_str += f"• <b>{item.get('product_title')}</b> — {item.get('quantity')} dona × {item.get('price', 0):,.0f} so'm\n"
+                items_str += f"• <b>{html.escape(str(item.get('product_title')))}</b> — {item.get('quantity')} dona × {item.get('price', 0):,.0f} so'm\n"
 
             time_left_str = "Taxminan 2 soat"
             if deadline:
@@ -1017,7 +1013,7 @@ class UzumService:
                 f"🔔 <b>Yangi Uzum FBS buyurtmasi!</b>\n\n"
                 f"🏪 <b>Do'kon:</b> <b>{shop_title}</b>\n"
                 f"📦 <b>Buyurtma:</b> <code>#{oid}</code> ({order.get('delivery_type', 'FBS')})\n"
-                f"📍 <b>Manzil:</b> {order.get('delivery_city', 'Toshkent')}\n"
+                f"📍 <b>Manzil:</b> {html.escape(str(order.get('delivery_city', 'Toshkent')))}\n"
                 f"🛍️ <b>Tarkibi:</b>\n{items_str}"
                 f"💰 <b>Jami summa:</b> <b>{total:,.0f} so'm</b>\n"
                 f"⏳ <b>Tasdiqlash muddati:</b> {time_left_str}\n\n"
@@ -1053,8 +1049,9 @@ class UzumService:
             )
 
             if success:
-                mark_order_notified(oid)
+                mark_order_notified(user_id, oid)
                 log_uzum_notification(
+                    user_id,
                     event_type="new_fbs_order",
                     shop_id=order.get("shop_id"),
                     order_id=oid,
@@ -1067,7 +1064,7 @@ class UzumService:
 
         return sent_count
 
-    async def send_test_push(self, chat_id: int, lang: str = "uz") -> bool:
+    async def send_test_push(self, user_id: int, chat_id: int, lang: str = "uz") -> bool:
         """Send a test push notification to verify Telegram bot delivery."""
         test_oid = 998811
         if lang == "uz":
@@ -1108,7 +1105,7 @@ class UzumService:
             reply_markup=reply_markup,
         )
         if ok:
-            save_uzum_settings(telegram_chat_id=chat_id)
+            save_uzum_settings(user_id, telegram_chat_id=chat_id)
         return ok
 
 

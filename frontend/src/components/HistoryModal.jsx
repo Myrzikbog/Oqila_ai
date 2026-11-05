@@ -1,4 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { withToken } from '../utils/session';
+
+const escapeHtml = (value) =>
+  String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 import { 
   History, 
   X, 
@@ -30,10 +34,12 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
     try {
       const q = searchQuery.trim() ? `&search=${encodeURIComponent(searchQuery.trim())}` : '';
       const fav = onlyFavorites ? '&favorites_only=true' : '';
-      const u = userId ? `&user_id=${userId}` : '';
-      const res = await fetch(`/api/history?limit=100${q}${fav}${u}`);
+      const res = await fetch(`/api/history?limit=100${q}${fav}`);
       const data = await res.json();
-      setHistoryItems(data.items || []);
+      // Photo URLs are loaded by <img>, which cannot send the Authorization header
+      setHistoryItems(
+        (data.items || []).map((item) => ({ ...item, studio_photo_url: withToken(item.studio_photo_url) })),
+      );
     } catch (err) {
       console.error('Failed to load history:', err);
     } finally {
@@ -133,7 +139,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
       <html>
       <head>
         <meta charset="utf-8">
-        <title>${item.title} — Oqila AI Katalog</title>
+        <title>${escapeHtml(item.title)} — Oqila AI Katalog</title>
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #1e293b; max-width: 650px; margin: 0 auto; }
           .card { border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
@@ -152,11 +158,11 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
       <body>
         <div class="card">
           <span class="badge">Oqila AI • O'zbekiston Tadbirkorlari</span>
-          ${item.studio_photo_url ? `<img src="${item.studio_photo_url}" alt="${item.title}" />` : ''}
-          <h1>${item.title}</h1>
-          <div class="price">${item.price_tag || ''}</div>
-          <div class="desc">${item.description || ''}</div>
-          <div class="tags">${(item.hashtags || []).join(' ')}</div>
+          ${item.studio_photo_url ? `<img src="${escapeHtml(item.studio_photo_url)}" alt="${escapeHtml(item.title)}" />` : ''}
+          <h1>${escapeHtml(item.title)}</h1>
+          <div class="price">${escapeHtml(item.price_tag || '')}</div>
+          <div class="desc">${escapeHtml(item.description || '')}</div>
+          <div class="tags">${escapeHtml((item.hashtags || []).join(' '))}</div>
           <div class="footer">
             <span>Sana: ${new Date(item.created_at).toLocaleDateString()}</span>
             <span>Oqila AI orqali qadoqlangan</span>

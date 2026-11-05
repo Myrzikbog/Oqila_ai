@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 # Load .env FIRST — before any service module is imported
 load_dotenv(override=True)
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, Security, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import APIKeyHeader
@@ -28,6 +28,14 @@ from pydantic import BaseModel
 # Import services (after env is loaded)
 from services.ai_service import ai_service
 from services.auth_service import resolve_auth_user, verify_telegram_init_data
+from services.session_service import (
+    check_admin_key,
+    create_session_token,
+    get_admin_secret_key,
+    get_webhook_secret,
+    new_guest_tg_id,
+    verify_session_token,
+)
 from services.database import (
     clear_history,
     delete_history_item,
@@ -69,14 +77,33 @@ logging.basicConfig(
 logger = logging.getLogger("oqila_ai")
 
 
+def _acquire_poller_lock():
+    """Only one uvicorn worker may run the Uzum poller, otherwise every notification is sent N times."""
+    try:
+        import fcntl
+    except ImportError:  # non-POSIX platform: single process assumed
+        return True
+    lock_path = Path(os.getenv("OQILA_POLLER_LOCK") or (Path(__file__).parent / ".uzum_poller.lock"))
+    try:
+        handle = open(lock_path, "w")
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return handle  # keep the handle open for the lifetime of the process
+    except OSError:
+        return None
+
+
 async def uzum_background_poller():
     """Periodic worker to sync live orders and dispatch Telegram push notifications."""
+    lock = _acquire_poller_lock()
+    if not lock:
+        logger.info("Uzum poller is already running in another worker; skipping in this one.")
+        return
     await asyncio.sleep(8)
     while True:
         try:
             from services.uzum_service import uzum_service
-            await uzum_service.sync_live_orders_and_stocks()
-            await uzum_service.check_and_send_notifications()
+            await uzum_service.sync_all_users()
+            await uzum_service.notify_all_users()
         except asyncio.CancelledError:
             break
         except Exception as exc:
@@ -89,11 +116,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Oqila AI application...")
     init_db()
+    if not get_admin_secret_key():
+        logger.warning(
+            "ADMIN_SECRET_KEY is not set (or shorter than 16 chars): admin API key access is disabled."
+        )
     poller_task = asyncio.create_task(uzum_background_poller())
     webapp_url = os.getenv("WEBAPP_URL", "").strip()
     if webapp_url and telegram_service.is_configured:
         try:
-            res = await telegram_service.set_webhook(webapp_url)
+            res = await telegram_service.set_webhook(webapp_url, secret_token=get_webhook_secret())
             logger.info("Telegram webhook auto-registration on startup: %s", res)
         except Exception as exc:
             logger.warning("Failed to auto-register telegram webhook on startup: %s", exc)
@@ -139,13 +170,9 @@ async def add_security_headers(request: Request, call_next):
 # Static files & React Frontend (SPA)
 # ---------------------------------------------------------------------------
 FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
-STATIC_DIR = Path(__file__).parent / "static"
-STATIC_DIR.mkdir(exist_ok=True)
 
 if (FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
-
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +242,7 @@ class AuthLoginRequest(BaseModel):
 
 
 class UpdateProfileRequest(BaseModel):
-    user_id: int
+    user_id: Optional[int] = None  # ignored: the user always comes from the session token
     name: Optional[str] = None
     status: Optional[str] = None
     category: Optional[str] = None
@@ -224,22 +251,57 @@ class UpdateProfileRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Security: Admin API Key Dependency
+# Security: user sessions and administrator access
 # ---------------------------------------------------------------------------
 admin_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
 
 
+def _bearer_token(request: Request) -> Optional[str]:
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip() or None
+    return None
+
+
+def _user_from_token(token: Optional[str]) -> dict:
+    user_id = verify_session_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user = get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not user.get("is_active", 1):
+        raise HTTPException(status_code=403, detail="Account is disabled")
+    return user
+
+
+def current_user(request: Request) -> dict:
+    """Resolve the signed-in user from the `Authorization: Bearer <session token>` header."""
+    return _user_from_token(_bearer_token(request))
+
+
+def current_user_for_media(request: Request, token: Optional[str] = None) -> dict:
+    """Like current_user, but also accepts `?token=` for URLs loaded by <img>/<a> tags,
+    which cannot send an Authorization header."""
+    return _user_from_token(_bearer_token(request) or token)
+
+
 def verify_admin_key(
+    request: Request,
     header_key: Optional[str] = Security(admin_key_header),
-    admin_key: Optional[str] = None,
-    key: Optional[str] = None,
 ) -> bool:
-    """Verify administrator access key via X-Admin-Key header or query parameters (?admin_key= or ?key=)."""
-    configured_key = os.getenv("ADMIN_SECRET_KEY", "").strip() or "oqila_admin_2026"
-    provided_key = (header_key or "").strip() or (admin_key or "").strip() or (key or "").strip()
-    if not provided_key or provided_key != configured_key:
-        raise HTTPException(status_code=403, detail="Invalid administrator secret key.")
-    return True
+    """Admin access: X-Admin-Key header matching ADMIN_SECRET_KEY, or Telegram initData
+    (X-Telegram-Init-Data header) of a user who is an administrator."""
+    if header_key and check_admin_key(header_key):
+        return True
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if init_data:
+        tg_user = verify_telegram_init_data(init_data)
+        if tg_user and tg_user.get("id") and telegram_service.is_admin_user(tg_user["id"]):
+            return True
+    if not get_admin_secret_key() and not init_data:
+        raise HTTPException(status_code=503, detail="Admin access is not configured (set ADMIN_SECRET_KEY).")
+    raise HTTPException(status_code=403, detail="Invalid administrator secret key.")
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +316,6 @@ async def root():
     react_index = FRONTEND_DIST / "index.html"
     if react_index.exists():
         return FileResponse(str(react_index))
-    legacy_index = STATIC_DIR / "index.html"
-    if legacy_index.exists():
-        return FileResponse(str(legacy_index))
     return JSONResponse({"status": "ok", "message": "Oqila AI API is running"})
 
 
@@ -274,63 +333,80 @@ async def health():
 # User Authentication & Profile API
 # ---------------------------------------------------------------------------
 @app.post("/api/auth/login")
-async def auth_login(req: AuthLoginRequest):
-    """Authenticate via Telegram WebApp initData or fallback browser profile."""
-    import time
-    resolved = resolve_auth_user(init_data=req.init_data, dev_profile=req.profile)
-    tg_id = resolved.get("tg_id")
+async def auth_login(req: AuthLoginRequest, request: Request):
+    """Sign in and receive a session token.
 
-    if not tg_id:
-        client_guest_id = (req.profile or {}).get("guest_id") or (900000000 + int(time.time()) % 10000000)
-        tg_id = int(client_guest_id)
+    - Inside Telegram: identity comes only from verified initData.
+    - Standalone browser: a server-generated guest identity; an existing guest session token
+      (Authorization header) keeps the same guest account.
+    """
+    profile = req.profile or {}
+    tg_id: Optional[int] = None
+    is_telegram = False
+    resolved: dict = {}
+
+    if req.init_data:
+        resolved = resolve_auth_user(init_data=req.init_data, dev_profile=profile)
+        if not resolved.get("is_authenticated"):
+            raise HTTPException(status_code=401, detail="Invalid or expired Telegram initData")
+        tg_id = int(resolved["tg_id"])
+        is_telegram = True
+    else:
+        existing_uid = verify_session_token(_bearer_token(request))
+        existing = get_user(existing_uid) if existing_uid else None
+        if existing:
+            tg_id = int(existing["tg_id"])
+        elif os.getenv("ALLOW_GUEST_LOGIN", "1").strip().lower() in ("0", "false", "no"):
+            raise HTTPException(status_code=401, detail="Please open the app from Telegram")
+        else:
+            tg_id = new_guest_tg_id()
+        resolved = resolve_auth_user(init_data=None, dev_profile=profile)
 
     user = upsert_user(
         tg_id=tg_id,
         tg_username=resolved.get("tg_username", ""),
         tg_first_name=resolved.get("tg_first_name", ""),
-        name=(req.profile or {}).get("name") or resolved.get("name", ""),
-        status=(req.profile or {}).get("status") or resolved.get("status", "self_employed"),
-        category=(req.profile or {}).get("category") or resolved.get("category", "sewing"),
-        sales_channel=(req.profile or {}).get("salesChannel") or resolved.get("sales_channel", "uzum"),
-        lang=(req.profile or {}).get("lang") or resolved.get("lang", "uz"),
+        name=profile.get("name") or resolved.get("name", ""),
+        status=profile.get("status") or resolved.get("status", "self_employed"),
+        category=profile.get("category") or resolved.get("category", "sewing"),
+        sales_channel=profile.get("salesChannel") or resolved.get("sales_channel", "uzum"),
+        lang=profile.get("lang") or resolved.get("lang", "uz"),
     )
-    user_with_stats = get_user(user["user_id"])
-    if user_with_stats:
-        user_with_stats["is_admin"] = telegram_service.is_admin_user(user_with_stats.get("tg_id"))
+    if not user.get("user_id"):
+        raise HTTPException(status_code=500, detail="Could not create user")
+    user_with_stats = get_user(user["user_id"]) or user
+    if not user_with_stats.get("is_active", 1):
+        raise HTTPException(status_code=403, detail="Account is disabled")
+    user_with_stats["is_admin"] = is_telegram and telegram_service.is_admin_user(user_with_stats.get("tg_id"))
     log_event(
         event_type="auth_login",
         lang=user.get("lang", "uz"),
         is_mock=False,
-        details={"user_id": user["user_id"], "is_telegram": resolved.get("is_authenticated", False)},
+        details={"user_id": user["user_id"], "is_telegram": is_telegram},
         user_id=user["user_id"],
     )
     return JSONResponse(content={
         "status": "ok",
         "user_id": user["user_id"],
-        "is_telegram": resolved.get("is_authenticated", False),
+        "is_telegram": is_telegram,
+        "session_token": create_session_token(user["user_id"]),
         "profile": user_with_stats,
     })
 
 
 @app.get("/api/profile")
-async def get_profile(user_id: Optional[int] = None, tg_id: Optional[int] = None):
-    """Retrieve full user profile with statistics."""
-    user = None
-    if user_id:
-        user = get_user(user_id)
-    elif tg_id:
-        user = get_user_by_tg_id(tg_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    user["is_admin"] = telegram_service.is_admin_user(user.get("tg_id"))
+async def get_profile(user: dict = Depends(current_user)):
+    """Retrieve the signed-in user's profile with statistics."""
+    user["is_admin"] = int(user.get("tg_id") or 0) > 0 and telegram_service.is_admin_user(user.get("tg_id"))
     return JSONResponse(content=user)
 
 
 @app.put("/api/profile")
-async def update_profile(req: UpdateProfileRequest):
-    """Update user business profile attributes."""
+async def update_profile(req: UpdateProfileRequest, user: dict = Depends(current_user)):
+    """Update the signed-in user's business profile attributes."""
+    user_id = user["user_id"]
     updated = update_user_profile(
-        user_id=req.user_id,
+        user_id=user_id,
         name=req.name,
         status=req.status,
         category=req.category,
@@ -339,12 +415,12 @@ async def update_profile(req: UpdateProfileRequest):
     )
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
-    updated["is_admin"] = telegram_service.is_admin_user(updated.get("tg_id"))
+    updated["is_admin"] = int(updated.get("tg_id") or 0) > 0 and telegram_service.is_admin_user(updated.get("tg_id"))
     log_event(
         event_type="profile_update",
         lang=updated.get("lang", "uz"),
-        details={"user_id": req.user_id},
-        user_id=req.user_id,
+        details={"user_id": user_id},
+        user_id=user_id,
     )
     return JSONResponse(content={"status": "ok", "profile": updated})
 
@@ -364,7 +440,8 @@ async def generate_card(
     content_tone: str = Form("luxury"),
     content_format: str = Form("instagram"),
     generate_photo: bool = Form(True),
-    user_id: Optional[int] = Form(None),
+    user_id: Optional[int] = Form(None),  # ignored: the user always comes from the session token
+    user: dict = Depends(current_user),
 ):
     """
     Generate a product marketing card.
@@ -372,10 +449,13 @@ async def generate_card(
     Supports generation from image or text description and custom prompts.
     Returns JSON with title, description, price_tag, hashtags, marketing_tip, and studio_photo_url.
     """
+    user_id = user["user_id"]
     image_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
 
     if image and image.filename:
+        if image.content_type and not image.content_type.startswith("image/"):
+            raise HTTPException(status_code=415, detail="Only image uploads are allowed")
         try:
             image_bytes = await image.read()
             image_mime = image.content_type or "image/jpeg"
@@ -455,7 +535,7 @@ async def generate_card(
 
 
 @app.get("/api/demo-card")
-async def demo_card(lang: str = "ru"):
+async def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
     """
     Return a pre-built demo product card (no image processing).
     Used for the «✨ Быстрое демо» button for stage presentations.
@@ -483,6 +563,7 @@ async def demo_card(lang: str = "ru"):
         desired_price=380_000,
         note="Демонстрационный образец",
         lang=lang,
+        user_id=user["user_id"],
     )
     result["id"] = card_id
 
@@ -491,6 +572,7 @@ async def demo_card(lang: str = "ru"):
         lang=lang,
         is_mock=True,
         details={"card_id": card_id, "title": result.get("title", "")},
+        user_id=user["user_id"],
     )
 
     return JSONResponse(content=result)
@@ -516,9 +598,12 @@ async def get_cards_history(
     offset: int = 0,
     favorites_only: bool = False,
     search: str = "",
-    user_id: Optional[int] = None,
+    user: dict = Depends(current_user),
 ):
-    """Retrieve history of generated product cards with search, favorites, user isolation, and pagination."""
+    """Retrieve the signed-in user's generated product cards with search, favorites and pagination."""
+    user_id = user["user_id"]
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
     items = get_history(limit=limit, offset=offset, favorites_only=favorites_only, search=search, user_id=user_id)
     total = get_history_count(favorites_only=favorites_only, search=search, user_id=user_id)
     return {
@@ -535,64 +620,66 @@ async def get_cards_history(
 
 
 @app.post("/api/history/{card_id}/favorite")
-async def toggle_card_favorite(card_id: int):
-    """Toggle star/favorite flag on a generated card."""
-    new_status = toggle_favorite(card_id)
+async def toggle_card_favorite(card_id: int, user: dict = Depends(current_user)):
+    """Toggle star/favorite flag on one of the user's cards."""
+    new_status = toggle_favorite(card_id, user_id=user["user_id"])
     if new_status is None:
         raise HTTPException(status_code=404, detail="Card not found")
     return {"status": "ok", "card_id": card_id, "is_favorite": new_status}
 
 
 @app.delete("/api/history/{card_id}")
-async def delete_card_history_item(card_id: int):
-    """Delete a single card from history."""
-    success = delete_history_item(card_id)
+async def delete_card_history_item(card_id: int, user: dict = Depends(current_user)):
+    """Delete one of the user's cards from history."""
+    success = delete_history_item(card_id, user_id=user["user_id"])
     if not success:
         raise HTTPException(status_code=404, detail="Card not found")
     return {"status": "ok", "deleted_id": card_id}
 
 
 @app.get("/api/cards/{card_id}/photo")
-async def get_card_photo(card_id: int):
-    """Serve card studio photo on-demand with high-performance caching."""
+async def get_card_photo(card_id: int, user: dict = Depends(current_user_for_media)):
+    """Serve the studio photo of one of the user's cards."""
     from services.database import get_db_connection
     import base64
-    from fastapi.responses import RedirectResponse
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT studio_photo_url FROM generated_cards WHERE id = ?", (card_id,))
+        cursor.execute(
+            "SELECT studio_photo_url FROM generated_cards WHERE id = ? AND user_id = ?",
+            (card_id, user["user_id"]),
+        )
         row = cursor.fetchone()
-        if not row or not row["studio_photo_url"]:
-            raise HTTPException(status_code=404, detail="Photo not found")
+    if not row or not row["studio_photo_url"]:
+        raise HTTPException(status_code=404, detail="Photo not found")
 
-        photo_val = row["studio_photo_url"]
-        if photo_val.startswith("data:"):
-            try:
-                header, b64_data = photo_val.split(",", 1)
-                mime = "image/jpeg"
-                if "image/png" in header:
-                    mime = "image/png"
-                elif "image/webp" in header:
-                    mime = "image/webp"
-                raw_bytes = base64.b64decode(b64_data)
-                return Response(
-                    content=raw_bytes,
-                    media_type=mime,
-                    headers={"Cache-Control": "public, max-age=604800, immutable"},
-                )
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Failed to decode photo: {exc}")
-        elif photo_val.startswith("http"):
-            return RedirectResponse(url=photo_val)
-        else:
-            raise HTTPException(status_code=404, detail="Invalid photo URL")
+    photo_val = row["studio_photo_url"]
+    if photo_val.startswith("data:"):
+        try:
+            header, b64_data = photo_val.split(",", 1)
+            mime = "image/jpeg"
+            if "image/png" in header:
+                mime = "image/png"
+            elif "image/webp" in header:
+                mime = "image/webp"
+            raw_bytes = base64.b64decode(b64_data)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Failed to decode photo")
+        return Response(
+            content=raw_bytes,
+            media_type=mime,
+            headers={"Cache-Control": "private, max-age=604800"},
+        )
+    if photo_val.startswith("https://"):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=photo_val)
+    raise HTTPException(status_code=404, detail="Invalid photo URL")
 
 
 @app.delete("/api/history")
-async def clear_all_cards_history():
-    """Clear all card history."""
-    clear_history()
+async def clear_all_cards_history(user: dict = Depends(current_user)):
+    """Clear the signed-in user's card history (other users are untouched)."""
+    clear_history(user_id=user["user_id"])
     return {"status": "ok"}
 
 
@@ -784,10 +871,12 @@ async def legal_steps(lang: str = "ru"):
 
 
 @app.post("/api/legal-qa")
-async def legal_qa(req: LegalQARequest):
+async def legal_qa(req: LegalQARequest, user: dict = Depends(current_user)):
     """AI-powered legal Q&A for Uzbekistan business questions."""
     if not req.question or len(req.question.strip()) < 3:
         raise HTTPException(status_code=400, detail="Question too short")
+    if len(req.question) > 4000:
+        raise HTTPException(status_code=413, detail="Question too long")
 
     answer = await ai_service.legal_qa(
         question=req.question,
@@ -803,6 +892,7 @@ async def legal_qa(req: LegalQARequest):
             "question": req.question[:120],
             "has_profile": req.user_profile is not None,
         },
+        user_id=user["user_id"],
     )
 
     return JSONResponse(content={"answer": answer})
@@ -811,21 +901,34 @@ async def legal_qa(req: LegalQARequest):
 # ---------------------------------------------------------------------------
 # Tab 4: Uzum Market OpenAPI Integration (Multi-Shop, Orders, Stocks, Finance)
 # ---------------------------------------------------------------------------
+def _own_telegram_chat_id(user: dict) -> int:
+    """Push notifications only go to the signed-in user's own Telegram chat."""
+    tg_id = int(user.get("tg_id") or 0)
+    if tg_id <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Telegram chat topilmadi. Ilovani @oqila_ai_bot orqali oching va /start bosing.",
+        )
+    return tg_id
+
+
 @app.get("/api/uzum/settings")
-async def get_uzum_settings_endpoint():
-    """Retrieve Uzum API connection settings and status."""
+async def get_uzum_settings_endpoint(user: dict = Depends(current_user)):
+    """Retrieve the user's Uzum API connection settings (the API key is returned masked only)."""
     from services.database import get_uzum_settings
-    return JSONResponse(content=get_uzum_settings())
+    return JSONResponse(content=get_uzum_settings(user["user_id"]))
 
 
 @app.post("/api/uzum/settings")
-async def save_uzum_settings_endpoint(req: UzumSettingsRequest):
-    """Connect Uzum API key or initialize Demo mode."""
+async def save_uzum_settings_endpoint(req: UzumSettingsRequest, user: dict = Depends(current_user)):
+    """Connect the user's Uzum API key or initialize Demo mode."""
     from services.uzum_service import uzum_service
+    tg_id = int(user.get("tg_id") or 0)
     res = await uzum_service.connect_and_sync(
+        user_id=user["user_id"],
         api_key=req.api_key,
         is_demo=bool(req.is_demo),
-        telegram_chat_id=req.telegram_chat_id,
+        telegram_chat_id=tg_id if tg_id > 0 else None,
     )
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message", "Error connecting Uzum API"))
@@ -833,18 +936,18 @@ async def save_uzum_settings_endpoint(req: UzumSettingsRequest):
 
 
 @app.delete("/api/uzum/settings")
-async def disconnect_uzum_endpoint():
-    """Disconnect and clear all cached Uzum data."""
-    from services.database import reset_uzum_data
-    reset_uzum_data()
+async def disconnect_uzum_endpoint(user: dict = Depends(current_user)):
+    """Disconnect the user's Uzum account and clear their cached Uzum data."""
+    from services.database import disconnect_uzum
+    disconnect_uzum(user["user_id"])
     return JSONResponse(content={"status": "ok", "message": "Uzum API muvaffaqiyatli uzildi"})
 
 
 @app.get("/api/uzum/shops")
-async def get_uzum_shops_endpoint():
-    """Get all shops belonging to the seller account."""
+async def get_uzum_shops_endpoint(user: dict = Depends(current_user)):
+    """Get all shops belonging to the user's seller account."""
     from services.database import get_uzum_shops
-    shops = get_uzum_shops()
+    shops = get_uzum_shops(user["user_id"])
     return JSONResponse(content={"shops": shops, "count": len(shops)})
 
 
@@ -853,176 +956,161 @@ async def get_uzum_orders_endpoint(
     shop_id: Optional[int] = None,
     status: Optional[str] = None,
     limit: int = 50,
+    user: dict = Depends(current_user),
 ):
-    """Retrieve Uzum orders filtered by shop_id and status."""
+    """Retrieve the user's Uzum orders filtered by shop_id and status."""
     from services.database import get_uzum_orders
-    orders = get_uzum_orders(shop_id=shop_id, status=status, limit=limit)
+    orders = get_uzum_orders(user["user_id"], shop_id=shop_id, status=status, limit=limit)
     return JSONResponse(content={"orders": orders, "count": len(orders)})
 
 
 @app.post("/api/uzum/orders/{order_id}/confirm")
-async def confirm_uzum_order_endpoint(order_id: int):
-    """Confirm an FBS order (transitions from CREATED to CONFIRMED)."""
+async def confirm_uzum_order_endpoint(order_id: int, user: dict = Depends(current_user)):
+    """Confirm one of the user's FBS orders (transitions from CREATED to CONFIRMED)."""
     from services.uzum_service import uzum_service
-    res = await uzum_service.confirm_order(order_id)
+    res = await uzum_service.confirm_order(user["user_id"], order_id)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message"))
     return JSONResponse(content=res)
 
 
 @app.post("/api/uzum/orders/{order_id}/cancel")
-async def cancel_uzum_order_endpoint(order_id: int, req: Optional[UzumCancelOrderRequest] = None):
-    """Cancel an FBS order."""
+async def cancel_uzum_order_endpoint(
+    order_id: int,
+    req: Optional[UzumCancelOrderRequest] = None,
+    user: dict = Depends(current_user),
+):
+    """Cancel one of the user's FBS orders."""
     from services.uzum_service import uzum_service
     reason = req.reason if req else "Отсутствует на складе"
-    res = await uzum_service.cancel_order(order_id, reason=reason)
+    res = await uzum_service.cancel_order(user["user_id"], order_id, reason=reason)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message"))
     return JSONResponse(content=res)
 
 
 @app.get("/api/uzum/orders/{order_id}/label")
-async def get_uzum_order_label(order_id: int, size: str = "LARGE"):
+async def get_uzum_order_label(order_id: int, size: str = "LARGE", user: dict = Depends(current_user)):
     """Return shipping label information and printable format (58x40 or 43x25 mm)."""
     from services.uzum_service import uzum_service
-    res = await uzum_service.get_order_label(order_id, size=size)
+    res = await uzum_service.get_order_label(user["user_id"], order_id, size=size)
     if res.get("status") == "error":
         raise HTTPException(status_code=404, detail="Buyurtma yoki etiketka topilmadi")
     return JSONResponse(content=res)
 
 
 @app.get("/api/uzum/orders/{order_id}/label.png")
-async def get_uzum_order_label_png(order_id: int, size: str = "LARGE"):
+async def get_uzum_order_label_png(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
     """Return shipping label as a 203 DPI monochrome PNG image (58x40 or 43x25 mm)."""
     from services.uzum_service import uzum_service
-    png_bytes = uzum_service.generate_thermal_label_image(order_id, size=size)
+    png_bytes = uzum_service.generate_thermal_label_image(user["user_id"], order_id, size=size)
     if not png_bytes:
         raise HTTPException(status_code=404, detail="Etiketka rasmini yaratib bo'lmadi")
     return Response(content=png_bytes, media_type="image/png")
 
 
 @app.get("/api/uzum/orders/{order_id}/label.svg")
-async def get_uzum_order_label_svg(order_id: int, size: str = "LARGE"):
+async def get_uzum_order_label_svg(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
     """Return shipping label as a pure vector SVG (58x40 or 43x25 mm)."""
     from services.uzum_service import uzum_service
-    svg_content = uzum_service.generate_thermal_label_svg(order_id, size=size)
+    svg_content = uzum_service.generate_thermal_label_svg(user["user_id"], order_id, size=size)
+    if not svg_content:
+        raise HTTPException(status_code=404, detail="Buyurtma topilmadi")
     return Response(content=svg_content, media_type="image/svg+xml")
 
 
 @app.get("/api/uzum/stocks")
-async def get_uzum_stocks_endpoint(shop_id: Optional[int] = None):
-    """Retrieve SKU stocks and low-stock indicators."""
+async def get_uzum_stocks_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
+    """Retrieve the user's SKU stocks and low-stock indicators."""
     from services.database import get_uzum_stocks
-    stocks = get_uzum_stocks(shop_id=shop_id)
+    stocks = get_uzum_stocks(user["user_id"], shop_id=shop_id)
     return JSONResponse(content={"stocks": stocks, "count": len(stocks)})
 
 
 @app.post("/api/uzum/stocks/update")
-async def update_uzum_stock_endpoint(req: UzumUpdateStockRequest):
-    """Update stock quantity for a SKU."""
+async def update_uzum_stock_endpoint(req: UzumUpdateStockRequest, user: dict = Depends(current_user)):
+    """Update stock quantity for one of the user's SKUs."""
     from services.database import update_uzum_stock_amount
-    ok = update_uzum_stock_amount(req.sku_id, req.amount)
+    if req.amount < 0:
+        raise HTTPException(status_code=400, detail="Amount must be non-negative")
+    ok = update_uzum_stock_amount(user["user_id"], req.sku_id, req.amount)
     if not ok:
         raise HTTPException(status_code=404, detail="SKU topilmadi")
     return JSONResponse(content={"status": "ok", "sku_id": req.sku_id, "new_stock": req.amount})
 
 
 @app.post("/api/uzum/prices/update")
-async def update_uzum_price_endpoint(req: UzumUpdatePriceRequest):
-    """Update selling price for a SKU."""
+async def update_uzum_price_endpoint(req: UzumUpdatePriceRequest, user: dict = Depends(current_user)):
+    """Update selling price for one of the user's SKUs."""
     from services.database import update_uzum_price
-    ok = update_uzum_price(req.sku_id, req.price)
+    if req.price < 0:
+        raise HTTPException(status_code=400, detail="Price must be non-negative")
+    ok = update_uzum_price(user["user_id"], req.sku_id, req.price)
     if not ok:
         raise HTTPException(status_code=404, detail="SKU topilmadi")
     return JSONResponse(content={"status": "ok", "sku_id": req.sku_id, "new_price": req.price})
 
 
 @app.post("/api/uzum/stocks/cost-price")
-async def update_uzum_cost_price_endpoint(req: UzumUpdateCostPriceRequest):
-    """Update cost price (tannarxi / себестоимость) for a SKU."""
+async def update_uzum_cost_price_endpoint(req: UzumUpdateCostPriceRequest, user: dict = Depends(current_user)):
+    """Update cost price (tannarxi / себестоимость) for one of the user's SKUs."""
     from services.database import update_uzum_cost_price
-    ok = update_uzum_cost_price(req.sku_id, req.cost_price)
+    if req.cost_price < 0:
+        raise HTTPException(status_code=400, detail="Cost price must be non-negative")
+    ok = update_uzum_cost_price(user["user_id"], req.sku_id, req.cost_price)
     if not ok:
         raise HTTPException(status_code=404, detail="SKU topilmadi")
     return JSONResponse(content={"status": "ok", "sku_id": req.sku_id, "cost_price": req.cost_price})
 
 
 @app.get("/api/uzum/margin-guard")
-async def get_uzum_margin_guard_endpoint(shop_id: Optional[int] = None):
+async def get_uzum_margin_guard_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
     """Retrieve SKU-level unit economics and margin guard analytics."""
     from services.database import get_uzum_margin_analytics
-    data = get_uzum_margin_analytics(shop_id=shop_id)
-    return JSONResponse(content=data)
+    return JSONResponse(content=get_uzum_margin_analytics(user["user_id"], shop_id=shop_id))
 
 
 @app.get("/api/uzum/finance")
-async def get_uzum_finance_endpoint(shop_id: Optional[int] = None):
+async def get_uzum_finance_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
     """Retrieve financial summary (gross, commission, logistics, tax 1%, net payout)."""
     from services.database import get_uzum_finance_summary
-    fin = get_uzum_finance_summary(shop_id=shop_id)
-    return JSONResponse(content=fin)
+    return JSONResponse(content=get_uzum_finance_summary(user["user_id"], shop_id=shop_id))
 
 
 @app.post("/api/uzum/sync-now")
-async def sync_uzum_now_endpoint():
-    """Trigger manual sync and dispatch pending Telegram push notifications."""
+async def sync_uzum_now_endpoint(user: dict = Depends(current_user)):
+    """Trigger a manual sync of the user's account and dispatch their pending Telegram notifications."""
     from services.uzum_service import uzum_service
-    await uzum_service.sync_live_orders_and_stocks()
-    sent = await uzum_service.check_and_send_notifications()
+    await uzum_service.sync_live_orders_and_stocks(user["user_id"])
+    sent = await uzum_service.check_and_send_notifications(user["user_id"])
     return JSONResponse(content={"status": "ok", "sent_notifications": sent, "synced_at": datetime.now().isoformat()})
 
 
 @app.post("/api/uzum/test-push")
-async def test_uzum_push_endpoint(req: UzumTestPushRequest):
-    """Send test Telegram push notification to verify delivery."""
+async def test_uzum_push_endpoint(req: UzumTestPushRequest, user: dict = Depends(current_user)):
+    """Send a test Telegram push notification to the user's own chat."""
     from services.uzum_service import uzum_service
-    chat_id = req.chat_id
-    if not chat_id:
-        from services.database import get_subscribers, get_uzum_settings
-        settings = get_uzum_settings()
-        chat_id = settings.get("telegram_chat_id")
-        if not chat_id:
-            subs = get_subscribers()
-            if subs:
-                chat_id = subs[0]["chat_id"]
-    if not chat_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Telegram chat_id topilmadi. Avval @oqila_ai_bot ga /start bosing yoki chat_id kiriting."
-        )
-    ok = await uzum_service.send_test_push(chat_id=chat_id, lang=req.lang)
+    chat_id = _own_telegram_chat_id(user)
+    ok = await uzum_service.send_test_push(user["user_id"], chat_id=chat_id, lang=req.lang)
     if not ok:
         raise HTTPException(status_code=500, detail="Telegram'ga xabar yuborib bo'lmadi. TELEGRAM_BOT_TOKEN ni tekshiring.")
     return JSONResponse(content={"status": "ok", "chat_id": chat_id})
 
 
 @app.get("/api/uzum/fbo/forecast")
-async def get_uzum_fbo_forecast_endpoint(shop_id: Optional[int] = None):
+async def get_uzum_fbo_forecast_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
     """Retrieve FBO inventory days left forecast and stockout warnings."""
     from services.database import get_uzum_fbo_forecast
-    data = get_uzum_fbo_forecast(shop_id=shop_id)
+    data = get_uzum_fbo_forecast(user["user_id"], shop_id=shop_id)
     return JSONResponse(content={"forecast": data, "count": len(data)})
 
 
 @app.post("/api/uzum/fbo/test-alert")
-async def test_uzum_fbo_alert_endpoint(req: UzumFboAlertRequest):
-    """Send proactive Telegram restock alert for an FBO SKU."""
+async def test_uzum_fbo_alert_endpoint(req: UzumFboAlertRequest, user: dict = Depends(current_user)):
+    """Send a proactive Telegram restock alert for one of the user's FBO SKUs to their own chat."""
     from services.uzum_service import uzum_service
-    chat_id = req.chat_id
-    if not chat_id:
-        from services.database import get_subscribers, get_uzum_settings
-        settings = get_uzum_settings()
-        chat_id = settings.get("telegram_chat_id")
-        if not chat_id:
-            subs = get_subscribers()
-            if subs:
-                chat_id = subs[0]["chat_id"]
-    if not chat_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Telegram chat_id topilmadi. Avval @oqila_ai_bot ga /start bosing yoki chat_id kiriting."
-        )
-    ok = await uzum_service.send_fbo_restock_alert(chat_id=chat_id, sku_id=req.sku_id)
+    chat_id = _own_telegram_chat_id(user)
+    ok = await uzum_service.send_fbo_restock_alert(user["user_id"], chat_id=chat_id, sku_id=req.sku_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Telegram'ga xabar yuborib bo'lmadi.")
     return JSONResponse(content={"status": "ok", "sku_id": req.sku_id, "chat_id": chat_id})
@@ -1144,12 +1232,15 @@ async def admin_export_cards_csv(admin_auth: bool = Security(verify_admin_key)):
 @app.post("/api/telegram-webhook")
 async def telegram_webhook(request: Request):
     """Handle incoming Telegram webhook updates."""
-    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
-    if secret:
-        header_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if header_token != secret:
-            logger.warning("Rejected unauthorized Telegram webhook update")
-            raise HTTPException(status_code=403, detail="Forbidden")
+    import hmac
+
+    secret = get_webhook_secret()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Telegram bot is not configured")
+    header_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not hmac.compare_digest(header_token.encode("utf-8"), secret.encode("utf-8")):
+        logger.warning("Rejected unauthorized Telegram webhook update")
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     try:
         update = await request.json()
@@ -1163,8 +1254,12 @@ async def telegram_webhook(request: Request):
 
 
 @app.post("/api/set-webhook")
-async def set_telegram_webhook(req: Optional[SetWebhookRequest] = None, request: Request = None):
-    """Register webhook URL with Telegram Bot API."""
+async def set_telegram_webhook(
+    request: Request,
+    req: Optional[SetWebhookRequest] = None,
+    admin_auth: bool = Security(verify_admin_key),
+):
+    """Register webhook URL with Telegram Bot API (administrators only)."""
     target_url = (req.url if req and req.url else None) or os.getenv("WEBAPP_URL")
     if not target_url and request:
         target_url = str(request.base_url).rstrip("/")
@@ -1174,14 +1269,15 @@ async def set_telegram_webhook(req: Optional[SetWebhookRequest] = None, request:
     if not target_url:
         raise HTTPException(status_code=400, detail="Webhook URL must be provided")
 
-    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip() or None
-    result = await telegram_service.set_webhook(target_url, secret_token=secret)
+    if not target_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Webhook URL must use https://")
+    result = await telegram_service.set_webhook(target_url, secret_token=get_webhook_secret())
     return JSONResponse(content=result)
 
 
 @app.get("/api/webhook-info")
-async def get_webhook_status():
-    """Get current Telegram webhook registration status."""
+async def get_webhook_status(admin_auth: bool = Security(verify_admin_key)):
+    """Get current Telegram webhook registration status (administrators only)."""
     info = await telegram_service.get_webhook_info()
     return JSONResponse(content=info)
 
@@ -1194,19 +1290,19 @@ async def catch_all(full_path: str):
     """Serve SPA index for deep links or static assets from dist."""
     from fastapi.responses import FileResponse
     # Do not intercept API, health, static or assets
-    if full_path.startswith(("api/", "health", "static/", "assets/")):
+    if full_path.startswith(("api/", "health", "assets/")):
         raise HTTPException(status_code=404, detail="Not found")
 
-    file_in_dist = FRONTEND_DIST / full_path
-    if FRONTEND_DIST.exists() and file_in_dist.is_file():
-        return FileResponse(str(file_in_dist))
+    if FRONTEND_DIST.exists() and full_path:
+        dist_root = FRONTEND_DIST.resolve()
+        file_in_dist = (dist_root / full_path).resolve()
+        # Only serve files that really live inside frontend/dist (blocks ../ path traversal)
+        if file_in_dist.is_relative_to(dist_root) and file_in_dist.is_file():
+            return FileResponse(str(file_in_dist))
 
     react_index = FRONTEND_DIST / "index.html"
     if react_index.exists():
         return FileResponse(str(react_index))
-    legacy_index = STATIC_DIR / "index.html"
-    if legacy_index.exists():
-        return FileResponse(str(legacy_index))
     raise HTTPException(status_code=404, detail="Index not found")
 
 
@@ -1218,4 +1314,4 @@ if __name__ == "__main__":
 
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("main:app", host=host, port=port, reload=True)
+    uvicorn.run("main:app", host=host, port=port, reload=os.getenv("UVICORN_RELOAD", "0") == "1")

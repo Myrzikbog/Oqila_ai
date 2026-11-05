@@ -6,19 +6,16 @@ import AdminCards from './components/AdminCards';
 import AdminEvents from './components/AdminEvents';
 import AdminLogin from './components/AdminLogin';
 import AdminUserDetailModal from './components/AdminUserDetailModal';
-import { getAdminKey, setAdminKey, clearAdminKey, testAdminKey } from './utils/adminApi';
+import { clearAdminKey, hasAdminCredentials, testAdminKey } from './utils/adminApi';
 
 export default function AdminApp() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return Boolean(getAdminKey());
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(() => hasAdminCredentials());
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'users' | 'cards' | 'events'
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   useEffect(() => {
-    const key = getAdminKey();
-    if (key) {
-      testAdminKey(key).then((ok) => {
+    if (hasAdminCredentials()) {
+      testAdminKey().then((ok) => {
         if (ok) {
           setIsAuthenticated(true);
         } else {

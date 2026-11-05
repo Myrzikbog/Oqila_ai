@@ -51,6 +51,22 @@ if [ ! -f ".env" ]; then
     cp .env.example .env
     echo "❗ Please edit .env with your GEMINI_API_KEY and TELEGRAM_BOT_TOKEN"
 fi
+chmod 600 .env
+
+# Generate strong secrets once if they are missing or empty (never overwrite existing values)
+ensure_secret() {
+    local name="$1"
+    if ! grep -qE "^${name}=.{16,}" .env; then
+        local value
+        value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+        sed -i "/^${name}=/d" .env
+        echo "${name}=${value}" >> .env
+        echo "🔐 Generated ${name} in .env"
+    fi
+}
+ensure_secret ADMIN_SECRET_KEY
+ensure_secret SESSION_SECRET
+ensure_secret TELEGRAM_WEBHOOK_SECRET
 
 # 5. Setup systemd service for 24/7 background run
 echo "⚙️ Step 4: Setting up systemd service..."
@@ -66,7 +82,7 @@ Type=simple
 User=$(whoami)
 WorkingDirectory=$PROJECT_DIR
 EnvironmentFile=$PROJECT_DIR/.env
-ExecStart=$PROJECT_DIR/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
+ExecStart=$PROJECT_DIR/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2 --proxy-headers
 Restart=always
 RestartSec=5
 

@@ -12,6 +12,7 @@ import hmac
 import json
 import logging
 import os
+import time
 import urllib.parse
 from typing import Any, Dict, Optional
 
@@ -27,6 +28,9 @@ def verify_telegram_init_data(init_data: str, bot_token: Optional[str] = None) -
         return None
 
     token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        # Without a bot token the signature cannot be checked (an empty key would be forgeable)
+        return None
     try:
         parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
         received_hash = parsed.pop("hash", None)
@@ -42,6 +46,16 @@ def verify_telegram_init_data(init_data: str, bot_token: Optional[str] = None) -
 
         if not hmac.compare_digest(expected_hash, received_hash):
             logger.warning("Telegram initData hash mismatch")
+            return None
+
+        # Reject stale initData so a leaked copy cannot be replayed forever
+        max_age = int(os.getenv("TELEGRAM_INIT_DATA_MAX_AGE", str(24 * 3600)))
+        try:
+            auth_date = int(parsed.get("auth_date", "0"))
+        except ValueError:
+            auth_date = 0
+        if max_age > 0 and (auth_date <= 0 or time.time() - auth_date > max_age):
+            logger.warning("Telegram initData is expired")
             return None
 
         user_raw = parsed.get("user")

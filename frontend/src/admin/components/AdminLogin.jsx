@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Key, ArrowRight, AlertCircle, Eye, EyeOff, Sparkles, ExternalLink } from 'lucide-react';
+import { ShieldCheck, Key, ArrowRight, AlertCircle, Eye, EyeOff, ExternalLink } from 'lucide-react';
 import { testAdminKey, setAdminKey } from '../utils/adminApi';
 
 export default function AdminLogin({ onLoginSuccess }) {
@@ -30,11 +30,6 @@ export default function AdminLogin({ onLoginSuccess }) {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const fillDemoKey = () => {
-    setKeyInput('oqila_admin_2026');
-    setErrorMessage('');
   };
 
   return (
@@ -78,14 +73,6 @@ export default function AdminLogin({ onLoginSuccess }) {
                 <Key className="w-3.5 h-3.5 text-teal-400" />
                 <span>Секретный ключ администратора</span>
               </span>
-              <button
-                type="button"
-                onClick={fillDemoKey}
-                className="text-[11px] text-teal-400 hover:text-teal-300 transition-colors underline underline-offset-2 flex items-center space-x-1"
-              >
-                <Sparkles className="w-3 h-3" />
-                <span>Демо-ключ</span>
-              </button>
             </label>
 
             <div className="relative">

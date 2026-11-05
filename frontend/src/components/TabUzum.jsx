@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { withToken } from '../utils/session';
 import { 
   ShoppingBag, 
   Store, 
@@ -411,7 +412,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
   const handleDownloadLabelPng = (orderId, postingNumber) => {
     hapticImpact('light');
     const a = document.createElement('a');
-    a.href = `/api/uzum/orders/${orderId}/label.png`;
+    a.href = withToken(`/api/uzum/orders/${orderId}/label.png`);
     a.download = `uzum-label-${postingNumber || orderId}.png`;
     document.body.appendChild(a);
     a.click();
@@ -1695,10 +1696,10 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
             {/* Actual 203 DPI Thermal Label PNG / Vector SVG */}
             <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-2xl flex flex-col items-center justify-center">
               <img
-                src={`/api/uzum/orders/${labelModalOrder.order_id}/label.svg`}
+                src={withToken(`/api/uzum/orders/${labelModalOrder.order_id}/label.svg`)}
                 onError={(e) => {
                   e.currentTarget.onerror = null;
-                  e.currentTarget.src = `/api/uzum/orders/${labelModalOrder.order_id}/label.png`;
+                  e.currentTarget.src = withToken(`/api/uzum/orders/${labelModalOrder.order_id}/label.png`);
                 }}
                 alt="Uzum Thermal Label 58x40 mm"
                 className="w-full max-w-[320px] rounded-xl shadow-sm border border-slate-300 dark:border-slate-700 bg-white"
@@ -1719,7 +1720,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
               <button
                 onClick={() => {
                   hapticImpact('light');
-                  const printWin = window.open(`/api/uzum/orders/${labelModalOrder.order_id}/label.svg`, '_blank');
+                  const printWin = window.open(withToken(`/api/uzum/orders/${labelModalOrder.order_id}/label.svg`), '_blank');
                   if (printWin) {
                     printWin.onload = () => printWin.print();
                   } else {

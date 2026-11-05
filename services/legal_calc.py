@@ -186,8 +186,8 @@ def calculate(
     """
     Calculate profits, exact taxes under Uzbekistan Tax Code across business types.
     """
-    if cost_price <= 0:
-        cost_price = 1.0
+    if cost_price < 0:
+        cost_price = 0.0
     if sale_price < 0:
         sale_price = 0.0
 

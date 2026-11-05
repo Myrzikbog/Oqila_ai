@@ -2,46 +2,67 @@
  * adminApi.js — Administrative API client with session key handling
  */
 
+const KEY_STORAGE = 'oqila_admin_key';
+
+/** Telegram initData: inside the bot's WebApp an administrator is recognised without any key. */
+export function getTelegramInitData() {
+  if (typeof window === 'undefined') return '';
+  return window.Telegram?.WebApp?.initData || '';
+}
+
 export function getAdminKey() {
   if (typeof window === 'undefined') return '';
-  // 1. Check URL parameters (?admin_key=... or ?key=...)
+  // The key is never read from the URL (URLs leak into server logs and chat history).
+  // Drop a legacy ?key= / ?admin_key= parameter if present.
   try {
-    const params = new URLSearchParams(window.location.search);
-    const paramKey = params.get('admin_key') || params.get('key');
-    if (paramKey && paramKey.trim()) {
-      const clean = paramKey.trim();
-      sessionStorage.setItem('oqila_admin_key', clean);
-      localStorage.setItem('oqila_admin_key', clean);
-      return clean;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('key') || url.searchParams.has('admin_key')) {
+      url.searchParams.delete('key');
+      url.searchParams.delete('admin_key');
+      window.history.replaceState(null, '', url.toString());
     }
-  } catch {}
-
-  // 2. Check session or local storage
-  return (
-    sessionStorage.getItem('oqila_admin_key') ||
-    localStorage.getItem('oqila_admin_key') ||
-    ''
-  );
+    localStorage.removeItem(KEY_STORAGE); // older builds persisted the key permanently
+    return sessionStorage.getItem(KEY_STORAGE) || '';
+  } catch {
+    return '';
+  }
 }
 
 export function setAdminKey(key) {
   if (typeof window === 'undefined') return;
-  const clean = (key || '').trim();
-  sessionStorage.setItem('oqila_admin_key', clean);
-  localStorage.setItem('oqila_admin_key', clean);
+  try {
+    sessionStorage.setItem(KEY_STORAGE, (key || '').trim());
+  } catch {
+    /* ignore */
+  }
 }
 
 export function clearAdminKey() {
   if (typeof window === 'undefined') return;
-  sessionStorage.removeItem('oqila_admin_key');
-  localStorage.removeItem('oqila_admin_key');
+  try {
+    sessionStorage.removeItem(KEY_STORAGE);
+    localStorage.removeItem(KEY_STORAGE);
+  } catch {
+    /* ignore */
+  }
+}
+
+function adminHeaders(key = getAdminKey()) {
+  const headers = {};
+  if (key) headers['X-Admin-Key'] = key;
+  const initData = getTelegramInitData();
+  if (initData) headers['X-Telegram-Init-Data'] = initData;
+  return headers;
+}
+
+export function hasAdminCredentials() {
+  return Boolean(getAdminKey() || getTelegramInitData());
 }
 
 export async function adminFetch(endpoint, options = {}) {
-  const key = getAdminKey();
   const headers = {
     'Content-Type': 'application/json',
-    'X-Admin-Key': key,
+    ...adminHeaders(),
     ...(options.headers || {}),
   };
 
@@ -50,7 +71,7 @@ export async function adminFetch(endpoint, options = {}) {
     headers,
   });
 
-  if (res.status === 403) {
+  if (res.status === 403 || res.status === 503) {
     clearAdminKey();
     throw new Error('UNAUTHORIZED');
   }
@@ -63,10 +84,10 @@ export async function adminFetch(endpoint, options = {}) {
   return res.json();
 }
 
+/** Check credentials: an explicit key, or (when key is omitted) the stored key / Telegram initData. */
 export async function testAdminKey(key) {
-  const res = await fetch('/api/admin/dashboard', {
-    headers: { 'X-Admin-Key': key.trim() },
-  });
+  const headers = key === undefined ? adminHeaders() : adminHeaders(key.trim());
+  const res = await fetch('/api/admin/dashboard', { headers });
   return res.ok;
 }
 
@@ -110,9 +131,8 @@ export async function fetchAdminCards({ limit = 50, offset = 0, userId = null } 
 }
 
 export async function downloadUsersCsv() {
-  const key = getAdminKey();
   const res = await fetch('/api/admin/export/users.csv', {
-    headers: { 'X-Admin-Key': key },
+    headers: adminHeaders(),
   });
   if (!res.ok) throw new Error('Failed to download CSV');
   const blob = await res.blob();
@@ -127,9 +147,8 @@ export async function downloadUsersCsv() {
 }
 
 export async function downloadCardsCsv() {
-  const key = getAdminKey();
   const res = await fetch('/api/admin/export/cards.csv', {
-    headers: { 'X-Admin-Key': key },
+    headers: adminHeaders(),
   });
   if (!res.ok) throw new Error('Failed to download Cards CSV');
   const blob = await res.blob();

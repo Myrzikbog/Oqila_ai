@@ -317,14 +317,28 @@ class TelegramService:
             logger.error("Failed to edit message in %s: %s", chat_id, exc)
             return False
 
+    @staticmethod
+    def _app_user_id(tg_id: Optional[int]) -> Optional[int]:
+        """Map a Telegram user id to the internal users.user_id (None if the user never signed in)."""
+        if not tg_id:
+            return None
+        from services.database import get_user_by_tg_id
+        u = get_user_by_tg_id(int(tg_id))
+        return int(u["user_id"]) if u else None
+
     def is_admin_user(self, user_id: int | str, provided_key: Optional[str] = None) -> bool:
         """Check if Telegram user is authorized as an administrator."""
         uid_str = str(user_id).strip()
+        try:
+            if int(uid_str) <= 0:
+                return False  # browser guests (negative ids) can never be administrators
+        except ValueError:
+            return False
         if uid_str in self._verified_admin_tg_ids:
             return True
 
-        secret_key = os.getenv("ADMIN_SECRET_KEY", "oqila_admin_2026").strip()
-        if provided_key and provided_key.strip() == secret_key:
+        from services.session_service import check_admin_key
+        if provided_key and check_admin_key(provided_key):
             self._verified_admin_tg_ids.add(uid_str)
             try:
                 from services.database import set_user_admin
@@ -588,7 +602,18 @@ class TelegramService:
                 try:
                     order_id = int(cb_data.replace("uzum_confirm_", ""))
                     from services.uzum_service import uzum_service
-                    await uzum_service.confirm_order(order_id)
+                    owner_id = self._app_user_id(cb.get("from", {}).get("id"))
+                    res = (
+                        await uzum_service.confirm_order(owner_id, order_id)
+                        if owner_id
+                        else {"status": "error"}
+                    )
+                    if res.get("status") != "ok":
+                        await self.send_message(
+                            chat_id,
+                            f"⚠️ <b>Buyurtma #{order_id} tasdiqlanmadi.</b> Ilovada tekshirib ko'ring.",
+                        )
+                        return
                     await self.send_message(
                         chat_id,
                         f"✅ <b>Buyurtma #{order_id} muvaffaqiyatli tasdiqlandi!</b>\n\n"
@@ -601,7 +626,15 @@ class TelegramService:
                 try:
                     order_id = int(cb_data.replace("uzum_label_", ""))
                     from services.uzum_service import uzum_service
-                    label_bytes = uzum_service.generate_thermal_label_image(order_id, size="LARGE")
+                    owner_id = self._app_user_id(cb.get("from", {}).get("id"))
+                    label_bytes = (
+                        uzum_service.generate_thermal_label_image(owner_id, order_id, size="LARGE")
+                        if owner_id
+                        else b""
+                    )
+                    if not label_bytes:
+                        await self.send_message(chat_id, f"⚠️ Buyurtma #{order_id} topilmadi.")
+                        return
 
                     caption = (
                         f"🏷️ <b>Uzum FBS Markirovka etiketkasi</b>\n\n"
@@ -784,17 +817,18 @@ class TelegramService:
 
         elif text.startswith("/uzum"):
             from services.database import get_uzum_shops, get_uzum_orders, get_uzum_finance_summary
-            shops = get_uzum_shops()
-            orders = get_uzum_orders(status="CREATED")
-            fin = get_uzum_finance_summary()
+            owner_id = self._app_user_id(user_tg_id)
+            shops = get_uzum_shops(owner_id) if owner_id else []
+            orders = get_uzum_orders(owner_id, status="CREATED") if owner_id else []
+            fin = get_uzum_finance_summary(owner_id) if owner_id else {}
 
             shops_str = ""
             for s in shops:
                 pending_count = s.get('pending_orders_count', 0)
                 if user_lang == "ru":
-                    shops_str += f"• <b>{s['title']}</b> (Заказов в ожидании: {pending_count})\n"
+                    shops_str += f"• <b>{html.escape(s['title'])}</b> (Заказов в ожидании: {pending_count})\n"
                 else:
-                    shops_str += f"• <b>{s['title']}</b> (Kutilayotgan buyurtmalar: {pending_count})\n"
+                    shops_str += f"• <b>{html.escape(s['title'])}</b> (Kutilayotgan buyurtmalar: {pending_count})\n"
             if not shops_str:
                 shops_str = (
                     "• <i>Магазины пока не подключены (введите API ключ Uzum в приложении Oqila).</i>\n"
@@ -1311,10 +1345,13 @@ class TelegramService:
             await self.send_message(chat_id, denied_msg)
             return
 
-        from services.database import get_admin_dashboard_metrics, get_uzum_shops
+        from services.database import get_admin_dashboard_metrics, get_db_connection
         metrics = get_admin_dashboard_metrics()
-        shops = get_uzum_shops()
-        secret_key = os.getenv("ADMIN_SECRET_KEY", "oqila_admin_2026").strip()
+        try:
+            with get_db_connection() as conn:
+                shops_count = conn.execute("SELECT COUNT(*) FROM uzum_shops").fetchone()[0]
+        except Exception:
+            shops_count = 0
 
         total_users = metrics.get("total_users", 0)
         active_today = metrics.get("active_today", 0)
@@ -1323,9 +1360,10 @@ class TelegramService:
         total_subscribers = metrics.get("total_subscribers", 0)
         total_events = metrics.get("total_events", 0)
 
-        # Build WebApp & Browser URLs with embedded secret key for instant 1-click access
+        # The admin WebApp authenticates with Telegram initData of this admin user,
+        # so the secret key is never put into a URL (URLs end up in logs and chat history).
         base_clean = app_url.rstrip("/")
-        admin_webapp_url = f"{base_clean}/admin?key={secret_key}"
+        admin_webapp_url = f"{base_clean}/admin"
 
         now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
         admin_text = (
@@ -1334,7 +1372,7 @@ class TelegramService:
             f"• 👥 <b>Foydalanuvchilar:</b> <b>{total_users:,}</b> ta (Bugun faol: <b>{active_today:,}</b> | Haftada yangi: <b>{new_this_week:,}</b>)\n"
             f"• 📦 <b>AI Kartochkalar:</b> <b>{total_cards:,}</b> ta\n"
             f"• 🔔 <b>Bot obunachilari:</b> <b>{total_subscribers:,}</b> ta\n"
-            f"• 🛍️ <b>Uzum do'konlari:</b> <b>{len(shops)}</b> ta\n"
+            f"• 🛍️ <b>Uzum do'konlari:</b> <b>{shops_count}</b> ta\n"
             f"• ⚡ <b>Tizim hodisalari:</b> <b>{total_events:,}</b> ta\n\n"
             f"<i>Quyidagi tugmalar orqali WebApp boshqaruv panelini ochishingiz yoki Excel/CSV hisobotlarni to'g'ridan-to'g'ri Telegram chatga yuklab olishingiz mumkin:</i>"
         )

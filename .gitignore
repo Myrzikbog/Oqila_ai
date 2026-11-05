@@ -70,3 +70,7 @@ frontend/node_modules/
 # frontend/dist/ (included for production serving without needing Node.js on server)
 frontend/dist-ssr/
 
+
+# ===== Generated runtime secrets / locks =====
+.session_secret
+.uzum_poller.lock

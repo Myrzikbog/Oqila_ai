@@ -1,3 +1,5 @@
+import { getSessionToken, runLoginOnce, setSessionToken } from './session';
+
 /**
  * auth.js — Telegram WebApp initData & Backend User Authentication
  */
@@ -18,44 +20,39 @@ export function getTelegramUserRaw() {
 
 /**
  * Authenticate current user with the backend database.
- * If running inside Telegram, uses initData.
- * If running in standalone browser, uses cached profile / guest ID.
+ * Inside Telegram the server trusts only the signed initData.
+ * In a standalone browser the server creates a guest account; the stored session token
+ * keeps the same guest account on the next visit.
  */
-export async function loginWithBackend(cachedProfile = null) {
+export function loginWithBackend(cachedProfile = null) {
+  return runLoginOnce(() => doLogin(cachedProfile));
+}
+
+async function doLogin(cachedProfile) {
   try {
     const initData = getTelegramInitData();
-    let guestId = null;
-
-    if (!initData) {
-      // Standalone browser: persist a stable guest ID in localStorage
-      guestId = localStorage.getItem('oqila_guest_id');
-      if (!guestId) {
-        guestId = String(900000000 + Math.floor(Math.random() * 90000000));
-        localStorage.setItem('oqila_guest_id', guestId);
-      }
-    }
-
-    const payload = {
-      init_data: initData || null,
-      profile: {
-        ...(cachedProfile || {}),
-        guest_id: guestId ? parseInt(guestId, 10) : undefined,
-      },
-    };
+    const headers = { 'Content-Type': 'application/json' };
+    const existingToken = getSessionToken();
+    if (!initData && existingToken) headers.Authorization = `Bearer ${existingToken}`;
 
     const res = await fetch('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers,
+      body: JSON.stringify({
+        init_data: initData || null,
+        profile: { ...(cachedProfile || {}) },
+      }),
     });
 
     if (!res.ok) {
       console.warn('Backend login returned status:', res.status);
+      if (res.status === 401 || res.status === 403) setSessionToken(null);
       return null;
     }
 
     const data = await res.json();
-    return data; // { status, user_id, is_telegram, profile }
+    if (data.session_token) setSessionToken(data.session_token);
+    return data; // { status, user_id, is_telegram, session_token, profile }
   } catch (err) {
     console.error('Failed to authenticate with backend:', err);
     return null;
@@ -63,7 +60,7 @@ export async function loginWithBackend(cachedProfile = null) {
 }
 
 /**
- * Update user business profile on the server.
+ * Update the signed-in user's business profile on the server.
  */
 export async function saveProfileToBackend(userId, profile) {
   if (!userId) return null;
@@ -72,7 +69,6 @@ export async function saveProfileToBackend(userId, profile) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        user_id: userId,
         name: profile.name,
         status: profile.status,
         category: profile.category,
