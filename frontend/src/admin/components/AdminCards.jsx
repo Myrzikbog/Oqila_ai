@@ -10,6 +10,7 @@ import {
   Lightbulb,
   Download
 } from 'lucide-react';
+import AdminPhoto from './AdminPhoto';
 import { fetchAdminCards, downloadCardsCsv } from '../utils/adminApi';
 
 export default function AdminCards({ onSelectUser }) {
@@ -115,12 +116,7 @@ export default function AdminCards({ onSelectUser }) {
               {/* Studio photo if available */}
               {card.studio_photo_url && (
                 <div className="relative h-44 w-full bg-slate-950 overflow-hidden border-b border-slate-800">
-                  <img
-                    src={card.studio_photo_url}
-                    alt={card.title}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
+                  <AdminPhoto card={card} alt={card.title} className="w-full h-full object-cover" />
                   <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[10px] text-white font-mono">
                     {card.photoshoot_style || 'studio'}
                   </div>

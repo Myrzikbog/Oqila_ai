@@ -161,3 +161,13 @@ export async function downloadCardsCsv() {
   a.remove();
   window.URL.revokeObjectURL(url);
 }
+
+/**
+ * Card photos are protected, and <img> cannot send the admin headers:
+ * fetch the photo with them and return an object URL for the <img>.
+ */
+export async function fetchAdminPhotoUrl(cardId) {
+  const res = await fetch(`/api/admin/cards/${cardId}/photo`, { headers: adminHeaders() });
+  if (!res.ok) throw new Error(`Photo request failed: ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}

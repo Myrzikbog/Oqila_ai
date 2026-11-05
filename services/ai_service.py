@@ -170,11 +170,13 @@ class AIService:
         content_tone: str = "luxury",
         content_format: str = "instagram",
         generate_photo: bool = True,
+        force_mock: bool = False,
     ) -> dict:
         """
         Generate a product marketing card using Gemini Vision & optional AI Photoshoot.
+        force_mock=True returns the offline demo answer without calling Gemini.
         """
-        if self.is_mock:
+        if self.is_mock or force_mock:
             return self._mock_response(lang, cost_price, desired_price, note)
 
         try:
@@ -198,9 +200,15 @@ class AIService:
     # -----------------------------------------------------------------------
     # Public: legal Q&A chat
     # -----------------------------------------------------------------------
-    async def legal_qa(self, question: str, lang: str = "ru", user_profile: Optional[dict] = None) -> str:
+    async def legal_qa(
+        self,
+        question: str,
+        lang: str = "ru",
+        user_profile: Optional[dict] = None,
+        force_mock: bool = False,
+    ) -> str:
         """Answer a legal/business question about Uzbekistan regulations, personalized with user profile."""
-        if self.is_mock:
+        if self.is_mock or force_mock:
             return self._mock_legal_answer(question, lang, user_profile)
 
         lang_instruction = (

@@ -1,2 +1,5 @@
 -r requirements.txt
 pytest==8.3.4
+# Used only by tests: reference Code 128 encoder and a real barcode/QR scanner
+python-barcode==0.15.1
+zxing-cpp==3.1.1

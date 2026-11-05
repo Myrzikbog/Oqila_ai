@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from services.media_storage import delete_photo, is_served_photo, store_photo
+
 logger = logging.getLogger("oqila_db")
 
 DB_PATH = Path(os.getenv("OQILA_DB_PATH") or (Path(__file__).parent.parent / "oqila_ai.db"))
@@ -125,6 +127,13 @@ def init_db(force: bool = False) -> None:
                 cursor.execute("ALTER TABLE users ADD COLUMN agreed_terms INTEGER DEFAULT 0")
             except Exception:
                 pass
+
+            # Demo flags: seeded demo accounts and "quick demo" cards are excluded from public stats
+            for table in ("users", "generated_cards"):
+                try:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN is_demo INTEGER DEFAULT 0")
+                except Exception:
+                    pass
 
             # Bot subscribers for daily tips and tax reminders
             cursor.execute("""
@@ -309,73 +318,96 @@ def log_event(
 
 
 def get_stats() -> Dict[str, Any]:
-    """Return aggregated statistics for hackathon demo."""
+    """Public, aggregate-only platform statistics (shown on the /stage page).
+
+    Contains counts only: no names, ids, questions or any other per-user data.
+    """
+    empty = {
+        "users_total": 0,
+        "telegram_users": 0,
+        "active_7d": 0,
+        "cards_total": 0,
+        "calculations_total": 0,
+        "legal_questions_total": 0,
+        "uzum_connected_users": 0,
+        "bot_subscribers": 0,
+        "total_events": 0,
+        "by_lang": {},
+        "top_categories": [],
+        "daily_activity": [],
+    }
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) AS total FROM usage_logs")
-            total = cursor.fetchone()["total"]
 
-            cursor.execute("""
-                SELECT event_type, COUNT(*) AS count 
-                FROM usage_logs 
-                GROUP BY event_type
-            """)
-            events_by_type = {row["event_type"]: row["count"] for row in cursor.fetchall()}
+            def scalar(query: str) -> int:
+                return int(cursor.execute(query).fetchone()[0] or 0)
 
-            cursor.execute("""
-                SELECT lang, COUNT(*) AS count 
-                FROM usage_logs 
-                GROUP BY lang
-            """)
-            by_lang = {row["lang"]: row["count"] for row in cursor.fetchall()}
-
-            cursor.execute("""
-                SELECT is_mock, COUNT(*) AS count 
-                FROM usage_logs 
-                GROUP BY is_mock
-            """)
-            mock_counts = {bool(row["is_mock"]): row["count"] for row in cursor.fetchall()}
-
-            cursor.execute("""
-                SELECT id, created_at, event_type, lang, is_mock, details
-                FROM usage_logs
-                ORDER BY id DESC
-                LIMIT 10
-            """)
-            recent_logs = []
-            for row in cursor.fetchall():
-                try:
-                    det = json.loads(row["details"]) if row["details"] else {}
-                except Exception:
-                    det = row["details"]
-                recent_logs.append({
-                    "id": row["id"],
-                    "created_at": row["created_at"],
-                    "event_type": row["event_type"],
-                    "lang": row["lang"],
-                    "is_mock": bool(row["is_mock"]),
-                    "details": det,
-                })
-
+            # Seeded demo accounts never count as real usage
+            real_user = "COALESCE(is_demo, 0) = 0"
+            not_demo_owner = "(user_id IS NULL OR user_id NOT IN (SELECT user_id FROM users WHERE is_demo = 1))"
+            events = {
+                row["event_type"]: row["count"]
+                for row in cursor.execute(
+                    f"SELECT event_type, COUNT(*) AS count FROM usage_logs WHERE {not_demo_owner} GROUP BY event_type"
+                ).fetchall()
+            }
+            by_lang = {
+                row["lang"]: row["count"]
+                for row in cursor.execute(
+                    f"SELECT lang, COUNT(*) AS count FROM users WHERE lang IN ('uz', 'ru') AND {real_user} GROUP BY lang"
+                ).fetchall()
+            }
+            top_categories = [
+                {"category": row["category"], "count": row["count"]}
+                for row in cursor.execute(
+                    "SELECT category, COUNT(*) AS count FROM users WHERE category IS NOT NULL AND category != '' "
+                    f"AND {real_user} GROUP BY category ORDER BY count DESC LIMIT 5"
+                ).fetchall()
+            ]
+            daily = [
+                dict(row)
+                for row in cursor.execute(
+                    f"""
+                    WITH RECURSIVE days(day) AS (
+                        SELECT date('now', '-13 days')
+                        UNION ALL SELECT date(day, '+1 day') FROM days WHERE day < date('now')
+                    )
+                    SELECT day AS date,
+                           (SELECT COUNT(*) FROM generated_cards c
+                             WHERE date(c.created_at) = day AND COALESCE(c.is_demo, 0) = 0
+                               AND (c.user_id IS NULL OR c.user_id NOT IN (SELECT user_id FROM users WHERE is_demo = 1))) AS cards,
+                           (SELECT COUNT(*) FROM users u
+                             WHERE date(u.created_at) = day AND COALESCE(u.is_demo, 0) = 0) AS new_users
+                    FROM days ORDER BY day
+                    """
+                ).fetchall()
+            ]
             return {
-                "total_events": total,
-                "events_by_type": events_by_type,
+                "users_total": scalar(f"SELECT COUNT(*) FROM users WHERE {real_user}"),
+                "telegram_users": scalar(f"SELECT COUNT(*) FROM users WHERE tg_id > 0 AND {real_user}"),
+                "active_7d": scalar(
+                    f"SELECT COUNT(*) FROM users WHERE last_seen_at >= datetime('now', '-7 days') AND {real_user}"
+                ),
+                # Only cards people generated themselves: no "quick demo" samples, no seeded demo accounts
+                "cards_total": scalar(
+                    f"SELECT COUNT(*) FROM generated_cards WHERE COALESCE(is_demo, 0) = 0 AND {not_demo_owner}"
+                ),
+                "calculations_total": int(events.get("calculate", 0)),
+                "legal_questions_total": int(events.get("legal_qa", 0)),
+                # Live Uzum API connections only (demo mode is not a real shop)
+                "uzum_connected_users": scalar(
+                    f"SELECT COUNT(*) FROM uzum_settings WHERE is_connected = 1 AND COALESCE(is_demo, 0) = 0 AND {not_demo_owner}"
+                ),
+                "bot_subscribers": scalar("SELECT COUNT(*) FROM bot_subscribers WHERE is_active = 1"),
+                "total_events": sum(events.values()),
                 "by_lang": by_lang,
-                "real_ai_count": mock_counts.get(False, 0),
-                "mock_count": mock_counts.get(True, 0),
-                "recent_logs": recent_logs,
+                "top_categories": top_categories,
+                "daily_activity": daily,
             }
     except Exception as exc:
         logger.error("Could not fetch stats: %s", exc)
-        return {
-            "total_events": 0,
-            "events_by_type": {},
-            "by_lang": {},
-            "real_ai_count": 0,
-            "mock_count": 0,
-            "recent_logs": [],
-        }
+        return empty
 
 
 def save_generated_card(
@@ -393,10 +425,12 @@ def save_generated_card(
     note: Optional[str] = None,
     lang: str = "ru",
     user_id: Optional[int] = None,
+    is_demo: bool = False,
 ) -> int:
     """Save a generated product card to the database for history with optional user_id."""
     try:
         hashtags_json = json.dumps(hashtags, ensure_ascii=False) if isinstance(hashtags, list) else (hashtags or "[]")
+        studio_photo_url = store_photo(studio_photo_url)
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -404,13 +438,13 @@ def save_generated_card(
                 INSERT INTO generated_cards (
                     title, description, price_tag, hashtags, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_price, desired_price, note, lang, user_id, is_demo
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     title, description, price_tag, hashtags_json, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id
+                    cost_price, desired_price, note, lang, user_id, 1 if is_demo else 0
                 ),
             )
             conn.commit()
@@ -469,7 +503,7 @@ def get_history(
                     "hashtags": ht,
                     "marketing_tip": row["marketing_tip"],
                     "has_studio_photo": bool(row["studio_photo_url"]),
-                    "studio_photo_url": f"/api/cards/{row['id']}/photo" if (row["studio_photo_url"] and row["studio_photo_url"].startswith("data:")) else row["studio_photo_url"],
+                    "studio_photo_url": f"/api/cards/{row['id']}/photo" if is_served_photo(row["studio_photo_url"]) else row["studio_photo_url"],
                     "photoshoot_style": row["photoshoot_style"],
                     "content_tone": row["content_tone"],
                     "content_format": row["content_format"],
@@ -588,7 +622,13 @@ def delete_history_item(card_id: int, user_id: int) -> bool:
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            row = cursor.execute(
+                "SELECT studio_photo_url FROM generated_cards WHERE id = ? AND user_id = ?",
+                (card_id, user_id),
+            ).fetchone()
             cursor.execute("DELETE FROM generated_cards WHERE id = ? AND user_id = ?", (card_id, user_id))
+            if row and cursor.rowcount > 0:
+                delete_photo(row["studio_photo_url"])
             conn.commit()
             return cursor.rowcount > 0
     except Exception as exc:
@@ -601,7 +641,15 @@ def clear_history(user_id: int) -> bool:
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+            photos = [
+                r["studio_photo_url"]
+                for r in cursor.execute(
+                    "SELECT studio_photo_url FROM generated_cards WHERE user_id = ?", (user_id,)
+                ).fetchall()
+            ]
             cursor.execute("DELETE FROM generated_cards WHERE user_id = ?", (user_id,))
+            for photo in photos:
+                delete_photo(photo)
             conn.commit()
             return True
     except Exception as exc:
@@ -1175,7 +1223,7 @@ def get_admin_cards(
                     "hashtags": ht,
                     "marketing_tip": row["marketing_tip"],
                     "has_studio_photo": bool(row["studio_photo_url"]),
-                    "studio_photo_url": f"/api/cards/{row['id']}/photo" if (row["studio_photo_url"] and row["studio_photo_url"].startswith("data:")) else row["studio_photo_url"],
+                    "studio_photo_url": f"/api/cards/{row['id']}/photo" if is_served_photo(row["studio_photo_url"]) else row["studio_photo_url"],
                     "photoshoot_style": row["photoshoot_style"],
                     "cost_price": row["cost_price"],
                     "desired_price": row["desired_price"],

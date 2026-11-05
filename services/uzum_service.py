@@ -42,6 +42,7 @@ from services.database import (
     update_uzum_price,
     update_uzum_stock_amount,
 )
+from services.barcode import barcode_bars, sanitize_barcode_text
 from services.telegram_service import telegram_service
 
 logger = logging.getLogger("oqila_uzum")
@@ -317,6 +318,16 @@ DEMO_STOCKS = [
         "is_low_stock": 0,
     },
 ]
+
+
+_PNG_TEXT_REPLACEMENTS = {"ʻ": "'", "ʼ": "'", "‘": "'", "’": "'", "×": "x", "•": "-", "—": "-", "–": "-"}
+
+
+def _png_text(value: Any) -> str:
+    """Text for the Pillow default font: map Uzbek apostrophes, drop emoji and unsupported glyphs."""
+    text = "".join(_PNG_TEXT_REPLACEMENTS.get(ch, ch) for ch in str(value or ""))
+    text = "".join(ch for ch in text if ord(ch) < 0x250)  # Latin ranges render; emoji would be boxes
+    return " ".join(text.split())
 
 
 class UzumService:
@@ -787,7 +798,6 @@ class UzumService:
         Generate a crisp vector SVG barcode thermal label (58x40 mm or 43x25 mm).
         Works 100% reliably in any environment without external binary C-libraries.
         """
-        import random
         o = get_uzum_order(user_id, order_id)
         if not o:
             return ""
@@ -798,20 +808,24 @@ class UzumService:
 
         shop_title = html.escape(str(o.get("shop_title", "Do'kon")[:30]))
         posting_num = html.escape(str(o.get("posting_number", f"UZ-FBS-{order_id}")))
-        city = html.escape(str(o.get("delivery_city", "Toshkent")))
-        customer = html.escape(str(o.get("customer_name", "Xaridor")))
+        # Approximate characters per line so long names never run past the label edge
+        max_chars = 58 if size == "LARGE" else 40
+        recipient = f"{o.get('customer_name', 'Xaridor')} ({o.get('delivery_city', 'Toshkent')})"
+        recipient_max = max_chars - len("Qabul qiluvchi: ")
+        if len(recipient) > recipient_max:
+            recipient = recipient[: recipient_max - 1].rstrip() + "…"
+        recipient = html.escape(recipient)
 
-        # Generate barcode stripes
-        bar_y = 126 if size == "LARGE" else 95
-        bar_h = 135 if size == "LARGE" else 65
-        x = 24
-        rng = random.Random(order_id)
-        barcode_rects = []
-        while x < width - 24:
-            w = rng.choice([2, 3, 4, 6])
-            gap = rng.choice([2, 3, 4])
-            barcode_rects.append(f'<rect x="{x}" y="{bar_y}" width="{w}" height="{bar_h}" fill="#000000" />')
-            x += w + gap
+        # Real, scannable Code 128 barcode of the posting number
+        bar_y = 126 if size == "LARGE" else 122
+        bar_h = 135 if size == "LARGE" else 70
+        barcode_text = sanitize_barcode_text(o.get("posting_number"), str(order_id))
+        bars, _module = barcode_bars(barcode_text, x=8, max_width=width - 16)
+        barcode_rects = [
+            f'<rect x="{left:g}" y="{bar_y}" width="{w:g}" height="{bar_h}" fill="#000000" />'
+            for left, w in bars
+        ]
+        posting_num = html.escape(barcode_text)
 
         barcode_svg_bars = "\n    ".join(barcode_rects)
         items = o.get("items", [])
@@ -831,13 +845,13 @@ class UzumService:
     <!-- Meta details -->
     <text x="16" y="70" font-size="14" font-weight="700" fill="#000000">Do'kon: <tspan font-weight="500">{shop_title}</tspan></text>
     <text x="16" y="92" font-size="14" font-weight="700" fill="#000000">Jo'natma: <tspan font-weight="900" font-family="monospace">{posting_num}</tspan></text>
-    <text x="16" y="114" font-size="13" font-weight="500" fill="#333333">Qabul qiluvchi: {customer} ({city})</text>
+    <text x="16" y="114" font-size="13" font-weight="500" fill="#333333">Qabul qiluvchi: {recipient}</text>
     
     <!-- Barcode lines -->
     {barcode_svg_bars}
     
     <!-- Barcode human text -->
-    <text x="{width // 2}" y="{bar_y + bar_h + 22}" font-size="15" font-weight="800" font-family="monospace" text-anchor="middle" letter-spacing="3" fill="#000000">* {posting_num} *</text>
+    <text x="{width // 2}" y="{bar_y + bar_h + 22}" font-size="15" font-weight="800" font-family="monospace" text-anchor="middle" letter-spacing="3" fill="#000000">{posting_num}</text>
     
     <!-- Bottom footer -->
     <text x="16" y="{height - 16}" font-size="12" font-weight="500" fill="#444444">{item_str}</text>
@@ -851,9 +865,8 @@ class UzumService:
         - Clean layout, order posting number, store title, destination city, barcode stripes
         """
         try:
-            from PIL import Image, ImageDraw
+            from PIL import Image, ImageDraw, ImageFont
             import io
-            import random
 
             o = get_uzum_order(user_id, order_id)
             if not o:
@@ -869,41 +882,65 @@ class UzumService:
             draw.rectangle([(6, 6), (width - 6, height - 6)], outline="black", width=3)
             draw.line([(6, 44), (width - 6, 44)], fill="black", width=2)
 
+            def load_font(px: int):
+                try:
+                    return ImageFont.load_default(size=px)
+                except TypeError:  # Pillow < 10.1 has a single fixed-size bitmap font
+                    return ImageFont.load_default()
+
+            small = size != "LARGE"
+            font_header = load_font(15 if small else 17)
+            font_body = load_font(13 if small else 15)
+            max_text_w = width - 32
+
+            def fit(text: str, font) -> str:
+                """Shorten text with an ellipsis so it never runs past the label edge."""
+                if draw.textlength(text, font=font) <= max_text_w:
+                    return text
+                while text and draw.textlength(text + "...", font=font) > max_text_w:
+                    text = text[:-1]
+                return text.rstrip() + "..."
+
             # Header with size
-            size_label = "58×40 mm (Standard)" if size == "LARGE" else "43×25 mm"
-            draw.text((16, 14), f"UZUM MARKET FBS  •  {size_label}", fill="black")
+            size_label = "58x40 mm (Standard)" if size == "LARGE" else "43x25 mm"
+            draw.text((16, 14), f"UZUM MARKET FBS  |  {size_label}", fill="black", font=font_header)
 
             # Shop and recipient info
-            shop_title = o.get("shop_title", "Do'kon")[:32]
+            shop_title = _png_text(o.get("shop_title", "Do'kon"))[:32]
             posting_num = o.get("posting_number", f"UZ-FBS-{order_id}")
-            city = o.get("delivery_city", "Toshkent")
-            customer = o.get("customer_name", "Xaridor")
+            city = _png_text(o.get("delivery_city", "Toshkent"))
+            customer = _png_text(o.get("customer_name", "Xaridor"))
 
-            draw.text((16, 52), f"Do'kon: {shop_title}", fill="black")
-            draw.text((16, 74), f"Jo'natma: {posting_num}", fill="black")
-            draw.text((16, 96), f"Qabul qiluvchi: {customer} ({city})", fill="black")
+            line_h = 20 if small else 22
+            draw.text((16, 52), fit(f"Do'kon: {shop_title}", font_body), fill="black", font=font_body)
+            draw.text((16, 52 + line_h), fit(f"Jo'natma: {_png_text(posting_num)}", font_body), fill="black", font=font_body)
+            draw.text(
+                (16, 52 + 2 * line_h),
+                fit(f"Qabul qiluvchi: {customer} ({city})", font_body),
+                fill="black",
+                font=font_body,
+            )
 
-            # Barcode stripes
-            bar_y = 126 if size == "LARGE" else 105
-            bar_h = 135 if size == "LARGE" else 65
-            x = 22
-            rng = random.Random(order_id)
-            while x < width - 24:
-                w = rng.choice([2, 3, 5, 7])
-                gap = rng.choice([2, 3, 4])
-                draw.rectangle([(x, bar_y), (x + w, bar_y + bar_h)], fill="black")
-                x += w + gap
+            # Real, scannable Code 128 barcode (whole-pixel modules for crisp thermal printing)
+            bar_y = 126 if size == "LARGE" else 116
+            bar_h = 135 if size == "LARGE" else 64
+            barcode_text = sanitize_barcode_text(posting_num, str(order_id))
+            bars, _module = barcode_bars(barcode_text, x=8, max_width=width - 16)
+            for left, w in bars:
+                draw.rectangle([(int(left), bar_y), (int(left) + int(w) - 1, bar_y + bar_h)], fill="black")
 
-            # Human-readable barcode string
-            text_y = bar_y + bar_h + 8
-            draw.text((width // 2 - 75, text_y), f"* {posting_num} *", fill="black")
+            # Human-readable barcode string, centred under the bars
+            text_y = bar_y + bar_h + (4 if small else 8)
+            font = load_font(16 if small else 18)
+            text_w = draw.textlength(barcode_text, font=font)
+            draw.text(((width - text_w) / 2, text_y), barcode_text, fill="black", font=font)
 
             # Items info at bottom
             items = o.get("items", [])
             if items:
                 it = items[0]
-                it_str = f"Tarkibi: {it.get('product_title', '')[:30]} ({it.get('quantity', 1)} dona)"
-                draw.text((16, height - 30), it_str, fill="black")
+                it_str = f"Tarkibi: {_png_text(it.get('product_title', ''))[:30]} ({it.get('quantity', 1)} dona)"
+                draw.text((16, height - (26 if small else 30)), fit(it_str, font_body), fill="black", font=font_body)
 
             buf = io.BytesIO()
             img.save(buf, format="PNG")

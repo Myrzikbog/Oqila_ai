@@ -215,7 +215,8 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     try {
       const res = await fetch(`/api/demo-card?lang=${lang}`);
       if (!res.ok) {
-        throw new Error(t.error_network || 'Ошибка загрузки демо');
+        const errPayload = await res.json().catch(() => ({}));
+        throw new Error(errPayload.detail || t.error_network || 'Ошибка загрузки демо');
       }
       const data = await res.json();
       setResult(data);

@@ -555,10 +555,12 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
           user_profile: profile 
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      // A 429 carries a localized "too many requests" message in `detail`
+      const fallback = lang === 'uz' ? "Kechirasiz, javob olishda xatolik." : "Ошибка при получении ответа.";
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', text: data.answer || (lang === 'uz' ? "Kechirasiz, javob olishda xatolik." : "Ошибка при получении ответа.") }
+        { role: 'assistant', text: data.answer || (typeof data.detail === 'string' ? `⏳ ${data.detail}` : fallback) }
       ]);
       hapticNotify('success');
     } catch (err) {

@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT))
 
 _tmpdir = tempfile.mkdtemp(prefix="oqila-test-")
 os.environ["OQILA_DB_PATH"] = str(Path(_tmpdir) / "test.db")
+os.environ["OQILA_MEDIA_DIR"] = str(Path(_tmpdir) / "media")
+os.environ["OQILA_POLLER_LOCK"] = str(Path(_tmpdir) / "poller.lock")
 os.environ["AI_MODE"] = "mock"
 os.environ["GEMINI_API_KEY"] = ""
 os.environ["ADMIN_SECRET_KEY"] = "test-admin-key-0123456789"

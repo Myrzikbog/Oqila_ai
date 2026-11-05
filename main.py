@@ -63,6 +63,7 @@ from services.legal_calc import (
     LEGAL_STEPS_UZ,
     calculate,
 )
+from services.rate_limit import check_user_limit, global_ai_budget_exhausted
 from services.telegram_service import telegram_service
 
 from contextlib import asynccontextmanager
@@ -450,6 +451,10 @@ async def generate_card(
     Returns JSON with title, description, price_tag, hashtags, marketing_tip, and studio_photo_url.
     """
     user_id = user["user_id"]
+    limit_error = check_user_limit("generate_card", user_id, lang)
+    if limit_error:
+        raise HTTPException(status_code=429, detail=limit_error)
+    use_mock = ai_service.is_mock or global_ai_budget_exhausted()
     image_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
 
@@ -494,6 +499,7 @@ async def generate_card(
         content_tone=content_tone,
         content_format=content_format,
         generate_photo=generate_photo,
+        force_mock=use_mock,
     )
 
     # Save to history database
@@ -518,7 +524,7 @@ async def generate_card(
     log_event(
         event_type="generate_card",
         lang=lang,
-        is_mock=ai_service.is_mock,
+        is_mock=use_mock,
         details={
             "card_id": card_id,
             "title": result.get("title", ""),
@@ -537,10 +543,14 @@ async def generate_card(
 @app.get("/api/demo-card")
 async def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
     """
-    Return a pre-built demo product card (no image processing).
-    Used for the «✨ Быстрое демо» button for stage presentations.
+    Return a pre-built demo product card (no image processing, no Gemini call).
+    Used for the «✨ Быстрое демо» button: instant and works offline on stage.
     """
+    limit_error = check_user_limit("demo_card", user["user_id"], lang)
+    if limit_error:
+        raise HTTPException(status_code=429, detail=limit_error)
     result = await ai_service.generate_product_card(
+        force_mock=True,
         image_bytes=None,
         image_mime="image/jpeg",
         cost_price=120_000,
@@ -564,6 +574,7 @@ async def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
         note="Демонстрационный образец",
         lang=lang,
         user_id=user["user_id"],
+        is_demo=True,
     )
     result["id"] = card_id
 
@@ -637,24 +648,32 @@ async def delete_card_history_item(card_id: int, user: dict = Depends(current_us
     return {"status": "ok", "deleted_id": card_id}
 
 
-@app.get("/api/cards/{card_id}/photo")
-async def get_card_photo(card_id: int, user: dict = Depends(current_user_for_media)):
-    """Serve the studio photo of one of the user's cards."""
+def _card_photo_response(card_id: int, owner_id: Optional[int]) -> Response:
+    """Serve a card's studio photo; owner_id=None means any card (administrators only)."""
+    from fastapi.responses import FileResponse, RedirectResponse
     from services.database import get_db_connection
+    from services.media_storage import MIME_BY_EXT, resolve_photo
     import base64
 
+    query = "SELECT studio_photo_url FROM generated_cards WHERE id = ?"
+    params: list = [card_id]
+    if owner_id is not None:
+        query += " AND user_id = ?"
+        params.append(owner_id)
     with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT studio_photo_url FROM generated_cards WHERE id = ? AND user_id = ?",
-            (card_id, user["user_id"]),
-        )
-        row = cursor.fetchone()
+        row = conn.execute(query, params).fetchone()
     if not row or not row["studio_photo_url"]:
         raise HTTPException(status_code=404, detail="Photo not found")
 
     photo_val = row["studio_photo_url"]
-    if photo_val.startswith("data:"):
+    cache = {"Cache-Control": "private, max-age=604800"}
+    if photo_val.startswith("file:"):
+        path = resolve_photo(photo_val)
+        if not path:
+            raise HTTPException(status_code=404, detail="Photo not found")
+        mime = MIME_BY_EXT.get(path.suffix.lstrip(".").lower(), "application/octet-stream")
+        return FileResponse(str(path), media_type=mime, headers=cache)
+    if photo_val.startswith("data:"):  # legacy rows stored before photos moved to files
         try:
             header, b64_data = photo_val.split(",", 1)
             mime = "image/jpeg"
@@ -665,15 +684,16 @@ async def get_card_photo(card_id: int, user: dict = Depends(current_user_for_med
             raw_bytes = base64.b64decode(b64_data)
         except Exception:
             raise HTTPException(status_code=500, detail="Failed to decode photo")
-        return Response(
-            content=raw_bytes,
-            media_type=mime,
-            headers={"Cache-Control": "private, max-age=604800"},
-        )
+        return Response(content=raw_bytes, media_type=mime, headers=cache)
     if photo_val.startswith("https://"):
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url=photo_val)
     raise HTTPException(status_code=404, detail="Invalid photo URL")
+
+
+@app.get("/api/cards/{card_id}/photo")
+async def get_card_photo(card_id: int, user: dict = Depends(current_user_for_media)):
+    """Serve the studio photo of one of the user's cards."""
+    return _card_photo_response(card_id, owner_id=user["user_id"])
 
 
 @app.delete("/api/history")
@@ -878,16 +898,21 @@ async def legal_qa(req: LegalQARequest, user: dict = Depends(current_user)):
     if len(req.question) > 4000:
         raise HTTPException(status_code=413, detail="Question too long")
 
+    limit_error = check_user_limit("legal_qa", user["user_id"], req.lang)
+    if limit_error:
+        raise HTTPException(status_code=429, detail=limit_error)
+    use_mock = ai_service.is_mock or global_ai_budget_exhausted()
     answer = await ai_service.legal_qa(
         question=req.question,
         lang=req.lang,
         user_profile=req.user_profile,
+        force_mock=use_mock,
     )
 
     log_event(
         event_type="legal_qa",
         lang=req.lang,
-        is_mock=ai_service.is_mock,
+        is_mock=use_mock,
         details={
             "question": req.question[:120],
             "has_profile": req.user_profile is not None,
@@ -1121,8 +1146,11 @@ async def test_uzum_fbo_alert_endpoint(req: UzumFboAlertRequest, user: dict = De
 # ---------------------------------------------------------------------------
 @app.get("/api/stats")
 async def get_analytics():
-    """Return platform statistics from SQLite database."""
-    return JSONResponse(content=get_stats())
+    """Public aggregate statistics (counts only) for the /stage presentation page."""
+    stats = get_stats()
+    stats["bot_username"] = os.getenv("TELEGRAM_BOT_USERNAME", "oqila_ai_bot").strip().lstrip("@") or "oqila_ai_bot"
+    stats["generated_at"] = datetime.now().isoformat(timespec="seconds")
+    return JSONResponse(content=stats, headers={"Cache-Control": "no-store"})
 
 
 # ---------------------------------------------------------------------------
@@ -1194,6 +1222,12 @@ async def admin_get_cards(
     """Retrieve generated cards across all users."""
     cards = get_admin_cards(user_id=user_id, limit=limit, offset=offset)
     return JSONResponse(content={"cards": cards, "limit": limit, "offset": offset})
+
+
+@app.get("/api/admin/cards/{card_id}/photo")
+async def admin_get_card_photo(card_id: int, admin_auth: bool = Security(verify_admin_key)):
+    """Serve any card's studio photo to administrators."""
+    return _card_photo_response(card_id, owner_id=None)
 
 
 @app.get("/api/admin/export/users.csv")

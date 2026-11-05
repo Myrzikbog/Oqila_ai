@@ -68,6 +68,9 @@ ensure_secret ADMIN_SECRET_KEY
 ensure_secret SESSION_SECRET
 ensure_secret TELEGRAM_WEBHOOK_SECRET
 
+# Move card photos stored inline in SQLite (older versions) into media/ files
+python scripts/migrate_photos_to_files.py
+
 # 5. Setup systemd service for 24/7 background run
 echo "⚙️ Step 4: Setting up systemd service..."
 SERVICE_FILE="/etc/systemd/system/oqila-ai.service"
