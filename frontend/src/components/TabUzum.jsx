@@ -1175,7 +1175,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                           <span className="font-bold text-rose-600">-{(mgItem.logistics_fee || 12000).toLocaleString()} {t.currency}</span>
                         </div>
                         <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                          <span>{isUz ? "1% YaTT solig'i:" : "Налог 1% (удержан):"}</span>
+                          <span>{isUz ? "1% aylanmadan soliq:" : "Налог с оборота 1%:"}</span>
                           <span className="font-bold text-rose-600">-{(mgItem.tax_1pct || 0).toLocaleString()} {t.currency}</span>
                         </div>
                         <div className="pt-1.5 border-t border-slate-200 dark:border-slate-700 flex justify-between font-black text-xs">
@@ -1646,8 +1646,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
                   {isUz
-                    ? "Uzum komissiyasi (12-15%), yetkazib berish to'lovi va O'zbekiston soliq qonunchiligi bo'yicha 1% aylanma solig'i yechilganidan keyingi sof foyda prognozi."
-                    : "Расчёт удержанной комиссии (12-15%), тарифов логистики и налога с оборота 1%, с выводом чистой выплаты на расчётный счёт или карту."
+                    ? "Uzum komissiyasi (tariflar bo'yicha, taxminan 12-15%), yetkazib berish to'lovi va 1% aylanmadan soliq hisobga olingandan keyingi sof foyda prognozi."
+                    : "Расчёт комиссии Uzum (по тарифам, примерно 12-15%), логистики и налога с оборота 1%, который продавец платит сам, — с итоговой чистой выплатой."
                   }
                 </p>
               </div>

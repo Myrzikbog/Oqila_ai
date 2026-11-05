@@ -92,7 +92,7 @@ export default function ProfileModal({
       icon: UserCheck,
       color: 'emerald',
       title: 'Самозанятая (1% налог)',
-      desc: 'Только свои изделия и ручной труд (1% налог с оборота). Нанимать работников и перепродавать чужой товар нельзя.',
+      desc: 'Свои изделия и услуги из перечня (1% налог с оборота). Нанимать работников нельзя; обычная перепродажа исключена из перечня с 2026 г.',
     },
     {
       id: 'yatt',
@@ -116,7 +116,7 @@ export default function ProfileModal({
       icon: UserCheck,
       color: 'emerald',
       title: 'O\'z-o\'zini band qilish (1% soliq)',
-      desc: 'Faqat o\'z mehnati va handmade mahsulotlar (1% aylanma soliq). Qayta sotish va ishchi yollash taqiqlanadi.',
+      desc: 'O\'z mahsulotlari va ro\'yxatdagi xizmatlar (1% aylanmadan soliq). Ishchi yollash mumkin emas; oddiy qayta sotish 2026-yildan ro\'yxatdan chiqarilgan.',
     },
     {
       id: 'yatt',

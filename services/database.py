@@ -1891,7 +1891,7 @@ def get_uzum_finance_summary(user_id: int, shop_id: Optional[int] = None) -> Dic
             commission_rate = 0.14  # average Uzum commission
             commission_amount = round(gross * commission_rate)
             logistics_fee = order_count * 5250  # approx. logistics fee per order
-            tax_turnover = round(gross * 0.01)  # 1% turnover tax withheld by Uzum as tax agent
+            tax_turnover = round(gross * 0.01)  # 1% turnover tax the seller pays on the full sale amount
             net_payout = max(0.0, gross - commission_amount - logistics_fee - tax_turnover)
 
             return {

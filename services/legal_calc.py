@@ -2,43 +2,46 @@
 legal_calc.py — Kalkulyator va Soliq/Huquqiy qoidalar (O'zbekiston Respublikasi)
 Финансово-налоговый калькулятор и официальная правовая база Республики Узбекистан (ред. 2026 г.).
 
-Нормативно-правовая база:
-1. Закон Республики Узбекистан № ЗРУ-1108 от 25.12.2025 г. (вступил в силу с 1 января 2026 г.):
-   - Введена ЕДИНАЯ ставка налога с оборота 1% для индивидуальных предпринимателей (ИП/ЯТТ)
-     и самозанятых лиц с совокупным годовым доходом до 1 миллиарда сумов (ст. 467, строка 5 таблицы ставок);
-   - Отменено прежнее освобождение от налога для самозанятых (ранее действовавшая льгота 0% до 100 млн сум);
-     теперь самозанятые платят 1% налог с оборота с первого сума дохода;
-   - Отменён фиксированный налог на доходы физических лиц для ИП;
-   - При реализации товаров через цифровые платформы (Uzum Market, платёжные системы) платформа
-     признаётся налоговым агентом и удерживает налог с оборота (1%) у источника выплаты;
-   - Порог перехода на общеустановленный порядок (НДС 12% + налог на прибыль) — годовой оборот свыше 1 млрд сум.
+Нормативно-правовая база (сверено с публикациями lex.uz, norma.uz, gov.uz/soliq — ноябрь 2026 г.):
+1. Закон РУз № ЗРУ-1108 от 25.12.2025 г. (действует с 1 января 2026 г.):
+   - ставка налога с оборота 1% для индивидуальных предпринимателей (ЯТТ) и самозанятых
+     (закон установил её для годового дохода до 1 млрд сум);
+   - отменено освобождение самозанятых от налога с оборота при доходе до 100 млн сум;
+   - отменён налог с оборота в фиксированной сумме (ст. 470¹ НК утратила силу);
+   - по доходам, полученным через цифровые платформы платёжных организаций, налог за самозанятых
+     перечисляет платёжная организация как налоговый агент. Маркетплейс Uzum Market — комиссионер,
+     налог с оборота продавец платит сам со всей суммы продажи (комиссия базу не уменьшает).
 
-2. Постановление Президента РУз № ПП-4742 от 08.06.2020 г.
-   «О мерах по упрощению государственного регулирования предпринимательской деятельности и самозанятости»:
-   - 104 разрешённых вида деятельности для самозанятых лиц (включая ремёсла, пошив, кулинарию, личные услуги);
-   - ⚠️ ВАЖНО: Торговля покупными товарами (перепродажа товаров из Китая, рынков «Абу Сахий»,
-     оптовых баз и фабрик) СТРОГО ЗАПРЕЩЕНА в режиме самозанятости!
-     Для любой перепродажи товаров закон требует регистрацию ЯТТ (индивидуального предпринимателя) или ООО (МЧЖ);
-   - Запрещено нанимать работников по трудовому договору;
-   - Самозанятые МОГУТ продавать на Uzum Market ТОЛЬКО изделия собственного производства.
+2. Указ Президента РУз № УП-100 от 26.05.2026 г. (с 1 июня 2026 г.):
+   - предельный размер дохода для обязательного перехода на общеустановленный порядок
+     (НДС и налог на прибыль) — 12 000 БРВ в год (≈5,28 млрд сум при БРВ 440 000 сум).
 
-3. Государственная регистрация предпринимательства:
-   - Закон РУз от 02.05.2012 г. № ЗРУ-328 «О гарантиях свободы предпринимательской деятельности»;
-   - Постановление Кабинета Министров РУз от 09.02.2017 г. № 66 (регистрация ЯТТ через fo.birdarcha.uz).
+3. Самозанятость: ПП-4742 от 08.06.2020 г. и Указ № УП-50 от 19.03.2025 г.:
+   - с 1 января 2026 г. перечень разрешённых видов деятельности сокращён со 104 до 72 пунктов;
+   - обычная розничная торговля, парикмахерские, косметологические услуги, фото- и видеосъёмка исключены;
+   - разрешена розничная продажа товаров (работ, услуг) на электронных торговых площадках (п. 33 перечня);
+   - нанимать работников по трудовому договору нельзя.
+   Сама площадка может ставить более строгие условия: по правилам Uzum самозанятые продают
+   только товары собственного производства.
 
-4. Налоговый кодекс Республики Узбекистан (2026 г.):
-   - Статья 467, таблица ставок, строка 5: Единая ставка налога с оборота для ИП и самозанятых — 1%;
-   - Статьи 237 & 461: Порог обязательного перехода на НДС (12%) — годовой оборот свыше 1 млрд сум;
-   - Статья 408, ч. 1, п. 1: Социальный налог для ЯТТ — не менее 1 БРВ в месяц (440 000 сум/мес) ОБЯЗАТЕЛЬНО;
-   - Статья 408, ч. 2: Социальный налог для самозанятых — не менее 1 БРВ в год (добровольно, для стажа);
-   - Статья 221: Ответственность за нарушение порядка применения ККМ и фискальных чеков (ПКМ № 943).
+4. Налоговый кодекс РУз:
+   - ст. 467 — ставки налога с оборота; ст. 470 — отчётный период месяц, уплата до 15 числа следующего месяца;
+   - ст. 408 ч. 1 — социальный налог ЯТТ не менее 1 БРВ в месяц (до 15 числа текущего месяца);
+   - ст. 408 ч. 2 — самозанятые добровольно платят не менее 1 БРВ в год для трудового стажа.
 
-5. Банковские счета:
-   - Закон РУз от 05.11.2019 г. № ЗРУ-580 «О банках и банковской деятельности»;
-   - Инструкция Центрального банка РУз о порядке открытия, ведения и закрытия банковских счетов (рег. МЮ № 3420 от 08.02.2023 г.).
+5. Регистрация и прочее:
+   - Закон «О гарантиях свободы предпринимательской деятельности» (в ред. ЗРУ-328 от 02.05.2012 г.);
+   - ПКМ № 66 от 09.02.2017 г. (государственная регистрация субъектов предпринимательства);
+   - Закон № ЗРУ-793 от 12.10.2022 г. «Об электронной цифровой подписи»;
+   - Закон № ЗРУ-792 от 29.09.2022 г. «Об электронной коммерции»;
+   - Закон № ЗРУ-580 от 05.11.2019 г. «О банках и банковской деятельности»;
+   - Инструкция ЦБ о порядке открытия, ведения и закрытия банковских счетов (рег. МЮ № 3420 от 08.02.2023 г.);
+   - ПКМ № 943 от 23.11.2019 г. «О мерах по обеспечению применения онлайн-ККМ и системы виртуальной кассы»;
+   - Закон № ЗРУ-578 от 01.11.2019 г. «О платежах и платежных системах».
 
-6. Электронные платежи:
-   - Закон РУз от 01.11.2019 г. № ЗРУ-578 «О платежах и платежных системах» (Click / Payme эквайринг 1.5%).
+БРВ = 440 000 сум с 1 сентября 2026 г. (Указ № УП-115 от 23.06.2026 г.).
+Тарифы Uzum (комиссии, логистика) и эквайринга — коммерческие условия, а не нормы права;
+в расчётах это ориентиры, актуальные значения — в кабинете продавца.
 """
 from __future__ import annotations
 
@@ -47,24 +50,26 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
-# Constants — Uzbekistan Legal & Tax Rates (2026 г., Закон № ЗРУ-1108)
+# Constants — Uzbekistan Legal & Tax Rates (2026 г., ЗРУ-1108, УП-100)
 # ---------------------------------------------------------------------------
-BRV_UZS = 440_000                            # 1 БРВ (Базовая расчетная величина) = 440 000 сум
+BRV_UZS = 440_000                            # 1 БРВ = 440 000 сум с 01.09.2026 (УП-115 от 23.06.2026)
 
-# Единая ставка налога с оборота (НК РУз, ст. 467, строка 5 таблицы ставок в ред. ЗРУ-1108)
-UNIFIED_TURNOVER_TAX_RATE = 0.01             # 1% единый налог с оборота для ИП и самозанятых (до 1 млрд сум)
-SELF_EMPLOYED_TAX_RATE = 0.01                # 1% налог с оборота (льгота 0% до 100 млн сум отменена с 01.01.2026)
+# Ставка налога с оборота для ЯТТ и самозанятых (ст. 467 НК в ред. ЗРУ-1108)
+UNIFIED_TURNOVER_TAX_RATE = 0.01             # 1% налог с оборота для ИП и самозанятых
+SELF_EMPLOYED_TAX_RATE = 0.01                # 1% налог с оборота (освобождение до 100 млн сум отменено с 01.01.2026)
 TAX_RATE_TRADE_STANDARD = 0.01               # 1% налог с оборота для ЯТТ (до 1 млрд сум)
 TAX_RATE_TRADE_ECOMMERCE = 0.01              # 1% налог с оборота для e-commerce / Uzum Market (до 1 млрд сум)
 TAX_RATE_PRODUCTION_YATT = 0.01              # 1% производство и ремесла для ЯТТ
 TAX_RATE_SERVICES_YATT = 0.01                # 1% сфера услуг для ЯТТ
 
-ANNUAL_TURNOVER_LIMIT = 1_000_000_000        # 1 млрд сум — порог обязательного НДС 12% (ст. 237, 461)
+# Порог обязательного перехода на НДС и налог на прибыль: 12 000 БРВ с 01.06.2026 (УП-100); до этого 1 млрд сум
+GENERAL_REGIME_THRESHOLD_BRV = 12_000
+ANNUAL_TURNOVER_LIMIT = GENERAL_REGIME_THRESHOLD_BRV * BRV_UZS   # ≈5,28 млрд сум
 YATT_ANNUAL_TURNOVER_LIMIT = ANNUAL_TURNOVER_LIMIT
 YATT_MANDATORY_SOCIAL_TAX = BRV_UZS          # 1 БРВ/месяц обязательно для ЯТТ (ст. 408 ч. 1)
 SELF_EMPLOYED_PENSION_TAX = BRV_UZS          # 1 БРВ/год добровольно для самозанятых (ст. 408 ч. 2)
 
-# Uzum Market Category Tariffs (ред. 2026 г.)
+# Uzum Market category commissions: approximate commercial tariffs (not law), check the seller cabinet
 UZUM_CATEGORY_RATES: Dict[str, Dict[str, Any]] = {
     "craft": {
         "rate": 0.12,
@@ -200,22 +205,26 @@ def calculate(
     if business_type == "resale":
         self_employed_allowed = False
         self_employed_warning_ru = (
-            "⚠️ ВНИМАНИЕ: Перепродажа покупных товаров (в т.ч. из Китая, рынков «Абу Сахий», оптовиков) "
-            "СТРОГО ЗАПРЕЩЕНА для самозанятых (ПП-4742)! Вы обязаны работать как ЯТТ или ООО. "
-            "Ставка налога с оборота для ЯТТ: 1% при доходе до 1 млрд сум (ст. 467 строка 5 НК РУз, Закон № ЗРУ-1108)."
+            "⚠️ С 1 января 2026 г. обычная розничная торговля исключена из перечня видов деятельности самозанятых "
+            "(Указ № УП-50). Самозанятым разрешена только розничная продажа на электронных торговых площадках "
+            "(п. 33 перечня), но Uzum по своим правилам допускает самозанятых лишь с товарами собственного производства. "
+            "Для перепродажи (Китай, опт, рынок, магазин, Telegram) надёжнее открыть ЯТТ. "
+            "Ставка налога с оборота для ЯТТ — 1% (ст. 467 НК, Закон № ЗРУ-1108)."
         )
         self_employed_warning_uz = (
-            "⚠️ DIQQAT: Xarid qilingan tovarlarni qayta sotish (jumladan Xitoy, Abu Saxiy yoki ulgurji bozorlardan) "
-            "o'z-o'zini band qilgan shaxslar uchun QAT'IYAN TAQIQLANGAN (PQ-4742)! YaTT yoki MChJ ochish shart. "
-            "YaTT uchun aylanmadan soliq stavkasi: 1% (SK 467-modda 5-band, O'RQ-1108-son qonun)."
+            "⚠️ 2026-yil 1-yanvardan oddiy chakana savdo o'z-o'zini band qilganlar faoliyat turlari ro'yxatidan "
+            "chiqarildi (PF-50-son Farmon). Ular faqat elektron savdo maydonchalarida chakana sotishi mumkin "
+            "(ro'yxatning 33-bandi), biroq Uzum o'z qoidalariga ko'ra o'z-o'zini band qilganlarga faqat o'zi ishlab "
+            "chiqargan mahsulotni sotishga ruxsat beradi. Qayta sotish (Xitoy, ulgurji, bozor, do'kon, Telegram) uchun "
+            "YaTT ochish ishonchliroq. YaTT uchun aylanmadan soliq stavkasi — 1% (SK 467-modda, O'RQ-1108-son qonun)."
         )
 
         yatt_rate = UNIFIED_TURNOVER_TAX_RATE
         yatt_rate_pct = 1.0
-        tax_name_ru = "Налог с оборота 1% (ст. 467 НК РУз, ЗРУ-1108)"
+        tax_name_ru = "Налог с оборота 1% (ст. 467 НК РУз, ЗРУ-1108)"  # resale
         tax_name_uz = "Aylanmadan soliq 1% (SK 467-modda, O'RQ-1108)"
 
-        # Для самозанятого перепродажа запрещена, но рассчитываем 1% для корректности
+        # Для сравнения считаем и вариант самозанятого (1%), хотя для перепродажи он ограничен
         self_employed_tax = round(sale_price * SELF_EMPLOYED_TAX_RATE, 0)
         self_employed_net = round(gross_profit - self_employed_tax, 0)
 
@@ -223,12 +232,14 @@ def calculate(
     elif business_type == "production":
         self_employed_allowed = True
         self_employed_warning_ru = (
-            "✅ Самозанятость РАЗРЕШЕНА: изготовление ремесленных изделий, национального текстиля, "
-            "выпечки и пошива на заказ. С 1 января 2026 г. ставка налога с оборота составляет 1% (ст. 467 НК РУз, Закон № ЗРУ-1108)."
+            "✅ Изделия собственного производства (ремёсла, текстиль, пошив, выпечка) — подходят для самозанятости, "
+            "если ваш вид деятельности есть в перечне из 72 пунктов, действующем с 1 января 2026 г. (Указ № УП-50); "
+            "проверьте его в приложении Soliq. Ставка налога с оборота — 1% (ст. 467 НК, Закон № ЗРУ-1108)."
         )
         self_employed_warning_uz = (
-            "✅ O'z-o'zini band qilishga RUXSAT ETILGAN: milliy hunarmandchilik, tikuvchilik va "
-            "pazandachilik mahsulotlari. 2026-yil 1-yanvardan aylanmadan soliq stavkasi 1% (SK 467-modda, O'RQ-1108)."
+            "✅ O'zi ishlab chiqargan mahsulotlar (hunarmandchilik, to'qimachilik, tikuvchilik, pishiriqlar) o'z-o'zini band "
+            "qilish uchun mos, agar faoliyat turingiz 2026-yil 1-yanvardan amal qiladigan 72 bandlik ro'yxatda bo'lsa "
+            "(PF-50-son Farmon); uni Soliq ilovasida tekshiring. Aylanmadan soliq stavkasi — 1% (SK 467-modda, O'RQ-1108)."
         )
         yatt_rate = UNIFIED_TURNOVER_TAX_RATE
         yatt_rate_pct = 1.0
@@ -241,12 +252,14 @@ def calculate(
     else:
         self_employed_allowed = True
         self_employed_warning_ru = (
-            "✅ Самозанятость РАЗРЕШЕНА для 104 видов услуг (IT, дизайн, красота, репетиторство, ремонт). "
-            "Ставка налога с оборота — 1% с первого сума (ст. 467 НК РУз, Закон № ЗРУ-1108)."
+            "✅ Многие услуги доступны самозанятым, но с 1 января 2026 г. перечень сокращён до 72 видов (Указ № УП-50): "
+            "например, парикмахерские, косметологические услуги, фото- и видеосъёмка из него исключены. "
+            "Проверьте свой вид деятельности в приложении Soliq. Ставка налога с оборота — 1% с первого сума (ЗРУ-1108)."
         )
         self_employed_warning_uz = (
-            "✅ 104 ta xizmat turi uchun o'z-o'zini band qilishga RUXSAT ETILGAN. "
-            "Aylanmadan soliq stavkasi — 1% (SK 467-modda, 2026-yil 1-yanvardan O'RQ-1108)."
+            "✅ Ko'plab xizmatlar o'z-o'zini band qilganlar uchun ochiq, biroq 2026-yil 1-yanvardan ro'yxat 72 turgacha "
+            "qisqartirildi (PF-50-son Farmon): masalan, sartaroshlik, kosmetologiya, foto va videosuratga olish chiqarildi. "
+            "Faoliyat turingizni Soliq ilovasida tekshiring. Aylanmadan soliq stavkasi — birinchi so'mdan 1% (O'RQ-1108)."
         )
         yatt_rate = UNIFIED_TURNOVER_TAX_RATE
         yatt_rate_pct = 1.0
@@ -272,7 +285,7 @@ def calculate(
     uzum_comm = round(sale_price * uzum_rate, 0)
     uzum_log = UZUM_LOGISTICS_BASE_UZS
     # Чистая прибыль на Uzum: Выручка − Себестоимость − Комиссия Uzum − Логистика Uzum − Налог с оборота 1%
-    # (Uzum Market выступает налоговым агентом и удерживает 1% налога с оборота)
+    # (Uzum — комиссионер: налог продавец платит сам со всей суммы продажи, комиссия базу не уменьшает)
     uzum_tax = round(sale_price * UNIFIED_TURNOVER_TAX_RATE, 0)
     uzum_net = round(gross_profit - uzum_comm - uzum_log - uzum_tax, 0)
 
@@ -309,19 +322,19 @@ def calculate(
     # 8. Советы по импорту из Китая:
     china_import_tip_ru = (
         "🇨🇳 <b>Налоги и правила при заказе товаров из Китая для перепродажи:</b>\n"
-        "• <b>Самозанятость НЕЛЬЗЯ использовать</b> для торговли китайскими товарами — только ЯТТ или ООО!\n"
+        "• <b>Для перепродажи китайских товаров откройте ЯТТ или ООО:</b> обычная розничная торговля исключена из перечня самозанятых (УП-50), а Uzum принимает самозанятых только с товарами своего производства.\n"
         f"• <b>Налог с каждой продажи:</b> {yatt_turnover_tax:,.0f} сум (1% налог с оборота, ст. 467 НК РУз, ЗРУ-1108).\n"
-        f"• <b>Фиксированный соцналог ЯТТ:</b> {BRV_UZS:,.0f} сум/мес (1 БРВ) независимо от объёма продаж.\n"
-        "• <b>Растаможка коммерческих партий:</b> НДС на импорт 12% + пошлина (0–20% по коду ТН ВЭД) + таможенный сбор.\n"
-        "• <b>Порог 1 млрд сум/год:</b> при превышении оборотный налог отменяется, обязателен переход на НДС 12% и налог на прибыль 12%."
+        f"• <b>Соцналог ЯТТ:</b> не менее {BRV_UZS:,.0f} сум/мес (1 БРВ) независимо от объёма продаж (ст. 408 НК).\n"
+        "• <b>Растаможка коммерческих партий:</b> НДС на импорт 12% + пошлина (по коду ТН ВЭД) + таможенный сбор.\n"
+        "• <b>Порог 12 000 БРВ/год (≈5,28 млрд сум, УП-100):</b> при превышении — обязательный переход на НДС и налог на прибыль."
     )
     china_import_tip_uz = (
         "🇨🇳 <b>Xitoydan qayta sotish uchun tovar olib kirishdagi soliqlar va qoidalar:</b>\n"
-        "• Xitoy tovarlarini sotishda <b>o'z-o'zini band qilish MUMKIN EMAS</b> — faqat YaTT yoki MChJ!\n"
+        "• <b>Xitoy tovarlarini qayta sotish uchun YaTT yoki MChJ oching:</b> oddiy chakana savdo o'z-o'zini band qilganlar ro'yxatidan chiqarilgan (PF-50), Uzum esa ularni faqat o'z mahsuloti bilan qabul qiladi.\n"
         f"• <b>Har bir sotuvdan soliq:</b> {yatt_turnover_tax:,.0f} so'm (1% aylanmadan soliq, SK 467-modda, O'RQ-1108).\n"
-        f"• <b>Oylik majburiy ijtimoiy soliq:</b> {BRV_UZS:,.0f} so'm/oy (1 BHM).\n"
-        "• <b>Tijorat partiyalarini bojxona rasmiylashtiruvi:</b> 12% QQS + bojxona boji (0–20%) + bojxona yig'imi.\n"
-        "• <b>1 mlrd so'm chegara:</b> Yillik tushum 1 mlrd so'mdan oshsa, 12% QQS va 12% foyda solig'iga majburiy o'tiladi."
+        f"• <b>Oylik majburiy ijtimoiy soliq:</b> kamida {BRV_UZS:,.0f} so'm/oy (1 BHM, SK 408-modda).\n"
+        "• <b>Tijorat partiyalarini bojxona rasmiylashtiruvi:</b> 12% import QQS + bojxona boji (TIF TN kodi bo'yicha) + bojxona yig'imi.\n"
+        "• <b>12 000 BHM chegara (≈5,28 mlrd so'm, PF-100):</b> oshib ketsa — QQS va foyda solig'iga majburiy o'tiladi."
     )
 
     # Юридические подсказки со ссылками на законы РУз
@@ -329,16 +342,18 @@ def calculate(
         f"⚖️ <b>Сводка налогов для вашего бизнеса ({tax_name_ru}):</b>\n\n"
         f"💰 <b>Налог с единицы товара:</b> <b>{tax_payable_item:,.0f} сум</b> (1% с выручки {sale_price:,.0f} сум).\n"
         f"📦 <b>Налог со 100 продаж:</b> <b>{tax_payable_100:,.0f} сум</b>.\n"
-        f"🏛️ <b>Обязательный соцналог ЯТТ:</b> <b>{BRV_UZS:,.0f} сум в месяц</b> (1 БРВ, ст. 408 НК РУз).\n"
-        f"⚠️ <b>Порог НДС 1 млрд сум:</b> При обороте свыше 1 млрд сум в год — переход на НДС 12% (ст. 237 НК РУз).\n\n"
+        f"🏛️ <b>Обязательный соцналог ЯТТ:</b> не менее <b>{BRV_UZS:,.0f} сум в месяц</b> (1 БРВ, ст. 408 НК РУз).\n"
+        f"📅 <b>Сроки:</b> налог с оборота — ежемесячно до 15 числа следующего месяца (ст. 470 НК); соцналог ЯТТ — до 15 числа текущего месяца.\n"
+        f"⚠️ <b>Порог 12 000 БРВ (≈5,28 млрд сум):</b> при доходе выше — переход на НДС и налог на прибыль (УП-100, с 01.06.2026).\n\n"
         + (china_import_tip_ru if business_type == "resale" else "")
     )
     tip_uz = (
         f"⚖️ <b>Biznesingiz bo'yicha soliq hisobi ({tax_name_uz}):</b>\n\n"
         f"💰 <b>Har bir donadan to'lanadigan soliq:</b> <b>{tax_payable_item:,.0f} so'm</b> (1% tushumdan {sale_price:,.0f} so'm).\n"
         f"📦 <b>100 ta sotuvdan soliq:</b> <b>{tax_payable_100:,.0f} so'm</b>.\n"
-        f"🏛️ <b>YaTT majburiy ijtimoiy soliq:</b> <b>{BRV_UZS:,.0f} so'm/oy</b> (1 BHM, SK 408-modda).\n"
-        f"⚠️ <b>1 mlrd so'm QQS chegarasi:</b> Yillik aylanma 1 mlrd so'mdan oshganda 12% QQS to'lovchisi bo'lish shart (SK 237-modda).\n\n"
+        f"🏛️ <b>YaTT majburiy ijtimoiy soliq:</b> kamida <b>{BRV_UZS:,.0f} so'm/oy</b> (1 BHM, SK 408-modda).\n"
+        f"📅 <b>Muddatlar:</b> aylanmadan soliq — har oy keyingi oyning 15-sanasigacha (SK 470-modda); YaTT ijtimoiy solig'i — joriy oyning 15-sanasigacha.\n"
+        f"⚠️ <b>12 000 BHM chegarasi (≈5,28 mlrd so'm):</b> daromad oshsa — QQS va foyda solig'iga o'tiladi (PF-100, 2026-yil 1-iyundan).\n\n"
         + (china_import_tip_uz if business_type == "resale" else "")
     )
 
@@ -396,71 +411,73 @@ def calculate(
 LEGAL_STEPS_RU = [
     {
         "step": 1,
-        "title": "Выбор формы: ЯТТ (для торговли/Китая) или Самозанятый (для хэндмейда/услуг)",
+        "title": "Выбор формы: ЯТТ (торговля, перепродажа) или самозанятость (свои изделия и услуги)",
         "description": (
-            "⚠️ Разделение по ПП-4742: если вы заказываете товары в Китае (1688, Taobao), на рынках или фабриках для перепродажи — "
-            "закон категорически запрещает самозанятость! Необходима регистрация ЯТТ (или ООО). "
-            "Самозанятость разрешена ИСКЛЮЧИТЕЛЬНО для изделий собственного изготовления (хэндмейд, пошив, кондитерка) "
-            "и 104 видов личных услуг."
+            "С 1 января 2026 г. самозанятые могут заниматься только видами деятельности из перечня в 72 пункта "
+            "(Указ № УП-50 от 19.03.2025). Обычная розничная торговля, парикмахерские, косметологические услуги, "
+            "фото- и видеосъёмка из него исключены; розничная продажа на электронных торговых площадках разрешена (п. 33). "
+            "Если вы закупаете товар (Китай, опт, рынок) для перепродажи вне маркетплейсов — нужен ЯТТ или ООО."
         ),
         "link": "https://my.soliq.uz",
-        "badge": "⚖️ Разделение по ПП-4742",
+        "badge": "⚖️ ПП-4742 • УП-50",
     },
     {
         "step": 2,
-        "title": "Онлайн регистрация ЯТТ за 15 минут (fo.birdarcha.uz)",
+        "title": "Онлайн-регистрация ЯТТ (fo.birdarcha.uz или my.gov.uz)",
         "description": (
-            "Регистрация индивидуального предпринимателя (ЯТТ) осуществляется онлайн на fo.birdarcha.uz или my.gov.uz. "
-            "Понадобится ключ ЭЦП (Закон № ЗРУ-793). Выберите код ОКЭД (для интернет-торговли и Uzum — 47.91). "
-            "Госпошлина при онлайн-оплате — 0.9 БРВ (со скидкой 10%). Свидетельство выдаётся мгновенно (ПКМ № 66)."
+            "ЯТТ регистрируется онлайн на fo.birdarcha.uz или my.gov.uz с ключом ЭЦП (Закон № ЗРУ-793). "
+            "Выберите код ОКЭД (для интернет-торговли — 47.91). Госпошлина при онлайн-подаче — 0,9 БРВ (396 000 сум), "
+            "в Центре госуслуг — 1 БРВ. Свидетельство формируется в личном кабинете (ПКМ № 66)."
         ),
         "link": "https://fo.birdarcha.uz",
         "badge": "🏢 ПКМ № 66 • birdarcha.uz",
     },
     {
         "step": 3,
-        "title": "Продажи на Uzum Market: кто и как может продавать (Закон № ЗРУ-792)",
+        "title": "Продажи на Uzum Market: кто может продавать",
         "description": (
-            "• Самозанятые МОГУТ продавать на Uzum Market, но ТОЛЬКО товары собственного производства (хэндмейд, пошив, выпечка). "
-            "• Для перепродажи любых покупных товаров (Китай, опт) ОБЯЗАТЕЛЕН статус ЯТТ или ООО. "
-            "Для регистрации на seller.uzum.uz загружаются документы, подписывается оферта и Uzum добавляется в комиссионеры в my.soliq.uz."
+            "• ЯТТ и ООО продают любые разрешённые товары. "
+            "• Самозанятых Uzum по своим правилам допускает только с товарами собственного производства (хэндмейд, пошив, выпечка). "
+            "Регистрация — на seller.uzum.uz: документы и электронная оферта. Uzum работает как комиссионер, "
+            "поэтому налог с оборота вы платите сами со всей суммы продажи."
         ),
         "link": "https://seller.uzum.uz",
         "badge": "🛍️ seller.uzum.uz",
     },
     {
         "step": 4,
-        "title": "Открытие счёта в банке: ЯТТ vs Самозанятые (Инструкция ЦБ № 3420)",
+        "title": "Банковский счёт: ЯТТ и самозанятые (Инструкция ЦБ, рег. № 3420)",
         "description": (
-            "• Для ЯТТ: открытие расчётного счёта (20208...) обязательно для маркетплейсов и эквайринга. "
-            "Открывается онлайн через приложения Kapitalbank Business, Anorbank, Ipoteka, TBC за 1–3 дня. "
-            "• Для самозанятых: отдельный расчётный счёт не нужен — выплаты от Uzum и клиентов поступают на личную карту Uzcard/Humo."
+            "• ЯТТ обычно открывает расчётный счёт — он нужен для маркетплейсов и эквайринга; "
+            "многие банки открывают его онлайн в бизнес-приложении. "
+            "• Самозанятые, как правило, принимают оплату на личную карту Uzcard/Humo. "
+            "Требования к конкретному счёту уточняйте в банке и у площадки."
         ),
-        "link": "https://kapitalbank.uz",
+        "link": "https://cbu.uz",
         "badge": "💳 Инструкция ЦБ № 3420",
     },
     {
         "step": 5,
-        "title": "Единый налог 1%: для ЯТТ и самозанятых (ст. 467 НК РУз, ЗРУ-1108)",
+        "title": "Налог с оборота 1% и соцналог (ЗРУ-1108, НК РУз)",
         "description": (
-            "С 1 января 2026 года установлена ЕДИНАЯ ставка налога с оборота 1% для ИП (ЯТТ) и самозанятых "
-            "при годовом доходе до 1 млрд сум (ст. 467, строка 5 таблицы ставок в ред. ЗРУ-1108). "
-            "На Uzum Market маркетплейс сам удерживает этот 1% как налоговый агент. "
-            "Соцналог: для ЯТТ — 1 БРВ (440 000 сум) в месяц обязательно (ст. 408); для самозанятых — 1 БРВ в год (добровольно). "
-            "Порог перехода на НДС (12%) и налог на прибыль — годовой оборот свыше 1 млрд сум."
+            "С 1 января 2026 г. ставка налога с оборота для ЯТТ и самозанятых — 1% (ст. 467 НК в ред. ЗРУ-1108). "
+            "Налог считается со всей выручки, платится ежемесячно до 15 числа следующего месяца (ст. 470 НК). "
+            "Соцналог: ЯТТ — не менее 1 БРВ (440 000 сум) в месяц, до 15 числа (ст. 408 ч. 1); "
+            "самозанятые — добровольно не менее 1 БРВ в год для стажа (ст. 408 ч. 2). "
+            "При доходе свыше 12 000 БРВ в год (≈5,28 млрд сум) — переход на НДС и налог на прибыль (УП-100, с 01.06.2026)."
         ),
         "link": "https://my.soliq.uz",
-        "badge": "📊 НК РУз ст. 467 (1%) • ЗРУ-1108",
+        "badge": "📊 НК РУз ст. 467, 470 • ЗРУ-1108",
     },
     {
         "step": 6,
-        "title": "Фискальные чеки и платежи: Click, Payme, Онлайн-ККМ (ПКМ № 943)",
+        "title": "Фискальные чеки: онлайн-ККМ, виртуальная касса, Click/Payme (ПКМ № 943)",
         "description": (
-            "По закону (ПКМ № 943) каждый расчет обязан сопровождаться фискальным чеком. "
-            "Используйте бесплатный QR-чек в приложении «Soliq» со смартфона, либо подключите эквайринг Click Merchant / "
-            "Payme Business (1.5%) — чеки формируются автоматически при каждой онлайн-оплате."
+            "По ПКМ № 943 от 23.11.2019 расчёты с покупателями сопровождаются фискальным чеком: "
+            "онлайн-ККМ, виртуальная касса или электронный чек платёжной системы (Click, Payme). "
+            "За торговлю без ККМ и невыдачу чека предусмотрены штрафы — уточните требования для своего вида деятельности на soliq.uz."
         ),
-        "link": "https://click.uz",
+        "link": "https://soliq.uz",
         "badge": "🧾 ПКМ № 943 • Чеки",
     },
 ]
@@ -468,70 +485,73 @@ LEGAL_STEPS_RU = [
 LEGAL_STEPS_UZ = [
     {
         "step": 1,
-        "title": "Shaklni tanlash: YaTT (savdo/Xitoy uchun) yoki O'z-o'zini band qilish (handmade/xizmat)",
+        "title": "Shaklni tanlash: YaTT (savdo, qayta sotish) yoki o'z-o'zini band qilish (o'z mahsuloti va xizmatlari)",
         "description": (
-            "⚠️ PQ-4742 bo'yicha ajratish: agar siz tovarlarni Xitoydan (1688, Taobao), bozorlardan yoki fabrikalardan qayta sotish uchun olib kelsangiz — "
-            "qonunchilik o'z-o'zini band qilishni qat'iyan taqiqlaydi! YaTT (yoki MChJ) ochish shart. "
-            "O'z-o'zini band qilish FAQAT o'z mehnati bilan yaratilgan buyumlar (handmade, tikuvchilik, pazandachilik) "
-            "va 104 ta xizmat turi uchun amal qiladi."
+            "2026-yil 1-yanvardan o'z-o'zini band qilganlar faqat 72 bandlik ro'yxatdagi faoliyat turlari bilan shug'ullana oladi "
+            "(PF-50-son Farmon, 19.03.2025). Oddiy chakana savdo, sartaroshlik, kosmetologiya xizmatlari, foto va videosuratga olish "
+            "ro'yxatdan chiqarilgan; elektron savdo maydonchalarida chakana sotishga ruxsat berilgan (33-band). "
+            "Agar tovarni (Xitoy, ulgurji, bozor) marketpleyslardan tashqarida qayta sotish uchun olsangiz — YaTT yoki MChJ kerak."
         ),
         "link": "https://my.soliq.uz",
-        "badge": "⚖️ PQ-4742 bo'yicha ajratish",
+        "badge": "⚖️ PQ-4742 • PF-50",
     },
     {
         "step": 2,
-        "title": "YaTTni 15 daqiqada onlayn ro'yxatdan o'tkazish (fo.birdarcha.uz)",
+        "title": "YaTTni onlayn ro'yxatdan o'tkazish (fo.birdarcha.uz yoki my.gov.uz)",
         "description": (
-            "Yakka tartibdagi tadbirkorlik (YaTT) to'liq onlayn tarzda fo.birdarcha.uz yoki my.gov.uz orqali ochiladi. "
-            "ERI kaliti kerak bo'ladi (O‘RQ-793-son qonun). Elektron savdo va Uzum uchun IFUT/OKED 47.91 kodini tanlang. "
-            "Onlayn to'lovda davlat boji 10% chegirma bilan 0.9 BHMni tashkil etadi (VMQ № 66)."
+            "YaTT fo.birdarcha.uz yoki my.gov.uz orqali ERI kaliti bilan onlayn ro'yxatdan o'tkaziladi (O'RQ-793-son qonun). "
+            "IFUT kodini tanlang (internet savdo uchun — 47.91). Onlayn murojaatda davlat boji — 0,9 BHM (396 000 so'm), "
+            "Davlat xizmatlari markazida — 1 BHM. Guvohnoma shaxsiy kabinetda shakllanadi (VMQ № 66)."
         ),
         "link": "https://fo.birdarcha.uz",
         "badge": "🏢 VMQ № 66 • birdarcha.uz",
     },
     {
         "step": 3,
-        "title": "Uzum Market'da sotuvlar: kim va qanday sota oladi (O‘RQ-792-son qonun)",
+        "title": "Uzum Market'da savdo: kim sota oladi",
         "description": (
-            "• O'z-o'zini band qilganlar Uzum Market'da sotuvchi bo'la oladi, ammo FAQAT o'zlari ishlab chiqargan buyumlarni sota oladi. "
-            "• Xitoy yoki ulgurji tovarlarni qayta sotish uchun YaTT yoki MChJ maqomi SHART. "
-            "seller.uzum.uz saytida ro'yxatdan o'tib, my.soliq.uz'da Uzum'ni komissioner sifatida qo'shish kerak."
+            "• YaTT va MChJ ruxsat etilgan har qanday tovarni sotadi. "
+            "• Uzum o'z qoidalariga ko'ra o'z-o'zini band qilganlarga faqat o'zi ishlab chiqargan mahsulotni (handmade, tikuvchilik, pishiriqlar) sotishga ruxsat beradi. "
+            "Ro'yxatdan o'tish — seller.uzum.uz: hujjatlar va elektron oferta. Uzum komissioner sifatida ishlaydi, "
+            "shuning uchun aylanmadan soliqni sotuvning to'liq summasidan o'zingiz to'laysiz."
         ),
         "link": "https://seller.uzum.uz",
         "badge": "🛍️ seller.uzum.uz",
     },
     {
         "step": 4,
-        "title": "Bankda hisobvaraq ochish: YaTT vs O'z-o'zini band qilganlar (MB 3420-Yo'riqnoma)",
+        "title": "Bank hisobvarag'i: YaTT va o'z-o'zini band qilganlar (MB Yo'riqnomasi, ro'yxat № 3420)",
         "description": (
-            "• YaTT uchun: 20208... hisobvarag'i ochish majburiy. Kapitalbank Business, Anorbank, Ipoteka, TBC ilovalarida 1-3 kunda onlayn ochiladi. "
-            "• O'z-o'zini band qilganlar uchun: alohida hisob ochish shart emas — to'lovlar shaxsiy Uzcard/Humo kartasiga tushadi."
+            "• YaTT odatda hisob-kitob hisobvarag'ini ochadi — u marketpleyslar va ekvayring uchun kerak; "
+            "ko'plab banklar uni biznes-ilovada onlayn ochadi. "
+            "• O'z-o'zini band qilganlar odatda to'lovni shaxsiy Uzcard/Humo kartasiga qabul qiladi. "
+            "Aniq talablarni bank va savdo maydonchasidan so'rang."
         ),
-        "link": "https://kapitalbank.uz",
-        "badge": "💳 MB 3420-sonli Yo'riqnomasi",
+        "link": "https://cbu.uz",
+        "badge": "💳 MB 3420-sonli Yo'riqnoma",
     },
     {
         "step": 5,
-        "title": "Yagona soliq 1%: YaTT va o'z-o'zini band qilganlar (SK 467-modda, O'RQ-1108)",
+        "title": "1% aylanmadan soliq va ijtimoiy soliq (O'RQ-1108, Soliq kodeksi)",
         "description": (
-            "2026-yil 1-yanvardan YaTT va o'z-o'zini band qilgan shaxslar uchun yillik 1 mlrd so'mgacha aylanmaga "
-            "yagona 1% aylanmadan soliq stavkasi belgilandi (SK 467-modda 5-band, O'RQ-1108-son qonun). "
-            "Uzum Market orqali savdoda Uzum soliq agenti sifatida 1% soliqni o'zi ushlab qoladi. "
-            "Ijtimoiy soliq: YaTT uchun oyiga 1 BHM (440 000 so'm/oy) majburiy; o'z-o'zini band qilganlar uchun yiliga 1 BHM ixtiyoriy. "
-            "Yillik tushum 1 mlrd so'mdan oshsa — majburiy 12% QQS va foyda solig'iga o'tiladi."
+            "2026-yil 1-yanvardan YaTT va o'z-o'zini band qilganlar uchun aylanmadan soliq stavkasi — 1% (SK 467-modda, O'RQ-1108). "
+            "Soliq butun tushumdan hisoblanadi va har oy keyingi oyning 15-sanasigacha to'lanadi (SK 470-modda). "
+            "Ijtimoiy soliq: YaTT — oyiga kamida 1 BHM (440 000 so'm), 15-sanagacha (SK 408-modda 1-qism); "
+            "o'z-o'zini band qilganlar — staj uchun ixtiyoriy ravishda yiliga kamida 1 BHM (408-modda 2-qism). "
+            "Yillik daromad 12 000 BHMdan (≈5,28 mlrd so'm) oshsa — QQS va foyda solig'iga o'tiladi (PF-100, 2026-yil 1-iyundan)."
         ),
         "link": "https://my.soliq.uz",
-        "badge": "📊 SK 467 (1%) • O'RQ-1108",
+        "badge": "📊 SK 467, 470 • O'RQ-1108",
     },
     {
         "step": 6,
-        "title": "Fiskal cheklar va to'lovlar: Click, Payme, Onlayn-NKM (VMQ № 943)",
+        "title": "Fiskal cheklar: onlayn-NKM, virtual kassa, Click/Payme (VMQ № 943)",
         "description": (
-            "VMQ № 943-son qarorga ko'ra har bir savdoda xaridorga chek berilishi shart. "
-            "«Soliq» ilovasidagi bepul QR-chekdan foydalaning yoki Click Merchant / Payme Business (1.5%) ulab oling — "
-            "chek har bir onlayn to'lovda avtomatik tarzda shakllanadi."
+            "VMQ № 943 (23.11.2019) ga ko'ra xaridor bilan hisob-kitobda fiskal chek beriladi: "
+            "onlayn-NKM, virtual kassa yoki to'lov tizimining elektron cheki (Click, Payme). "
+            "NKMsiz savdo va chek bermaslik uchun jarimalar nazarda tutilgan — talablarni soliq.uz saytida aniqlang."
         ),
-        "link": "https://click.uz",
+        "link": "https://soliq.uz",
         "badge": "🧾 VMQ № 943 • Cheklar",
     },
 ]

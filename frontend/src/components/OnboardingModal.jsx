@@ -48,7 +48,7 @@ export default function OnboardingModal({ isOpen, onClose, t, lang }) {
       icon: Calculator,
       badge: lang === 'uz' ? "2-qadam: Sof foyda & Soliq" : "Шаг 2: Чистая прибыль & Налоги",
       title: t.onboarding_title_2 || "Финансы и налоги РУз",
-      desc: t.onboarding_desc_2 || "Мгновенный расчёт чистой прибыли с учётом официальных льгот самозанятых (0%), ставок ЯТТ и комиссий Uzum Market.",
+      desc: t.onboarding_desc_2 || "Мгновенный расчёт чистой прибыли с учётом налога с оборота 1% (самозанятые и ЯТТ) и комиссий Uzum Market.",
       color: "from-emerald-500 to-teal-600",
       bgLight: "bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
       preview: (

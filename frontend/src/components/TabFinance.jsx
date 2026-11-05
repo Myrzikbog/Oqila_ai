@@ -133,7 +133,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
         `───────────────\n` +
         `🛍️ Uzum Market: Sof foyda ${formatMoney(calcData.uzum_net)} so'm (zararsiz min. narx: ${formatMoney(calcData.min_price_uzum)} so'm)\n` +
         `💬 Telegram (Click/Payme): Sof foyda ${formatMoney(calcData.telegram_net)} so'm\n` +
-        `${!calcData.self_employed_allowed ? '⚠️ DIQQAT: Xitoy tovarlarini qayta sotishda o\'z-o\'zini band qilish taqiqlangan, faqat YaTT!' : ''}`
+        `${!calcData.self_employed_allowed ? '⚠️ DIQQAT: Qayta sotish uchun YaTT oching — oddiy chakana savdo o\'z-o\'zini band qilganlar ro\'yxatidan chiqarilgan (PF-50), Uzum esa faqat o\'z mahsulotini qabul qiladi.' : ''}`
       : `📊 Oqila AI — Финансовый и налоговый анализ:\n` +
         `💼 Деятельность: ${businessType === 'resale' ? 'Перепродажа (Китай/опт)' : 'Собственное производство'}\n` +
         `💰 Цена реализации: ${formatMoney(calcData.sale_price)} сум\n` +
@@ -145,7 +145,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
         `───────────────\n` +
         `🛍️ Uzum Market: Чистая прибыль ${formatMoney(calcData.uzum_net)} сум (мин. цена: ${formatMoney(calcData.min_price_uzum)} сум)\n` +
         `💬 Telegram (Click/Payme): Чистая прибыль ${formatMoney(calcData.telegram_net)} сум\n` +
-        `${!calcData.self_employed_allowed ? '⚠️ ВНИМАНИЕ: Для перепродажи товаров из Китая самозанятость ЗАПРЕЩЕНА (ПП-4742), обязателен ЯТТ!' : ''}`;
+        `${!calcData.self_employed_allowed ? '⚠️ ВНИМАНИЕ: Для перепродажи откройте ЯТТ — обычная розничная торговля исключена из перечня самозанятых (УП-50), а Uzum принимает только товары своего производства.' : ''}`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);

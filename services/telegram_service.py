@@ -43,47 +43,51 @@ logger = logging.getLogger("oqila_telegram")
 TELEGRAM_API_BASE = "https://api.telegram.org"
 
 DAILY_TIPS_UZ = [
-    "💡 <b>Savdo maslahati:</b> Uzum Market'da sotayotganda, mahsulot tannarxiga kamida 25-30% ustama qo'ying. Bu marketpleysning 12% komissiyasi va 15 000 so'm logistika to'lovini qoplaydi hamda sizga sof foyda qoldiradi.",
-    "🧵 <b>Hunarmand qizlar uchun:</b> «Hunarmand» uyushmasi a'zolari uchun soliq 0%! Boshqa o'z-o'zini band qilganlarda esa 2026-yildan 1% yagona aylanma solig'i amal qiladi.",
-    "📸 <b>Vizual marketing:</b> Instagram va Telegram kanalda mahsulotni faqat oq fonda emas, balki 'hayotiy' muhitda (masalan, kiyimni qizlar kiygan holda, dasturxonni bezatilgan holda) ko'rsatish sotuvni 40% ga oshiradi.",
+    "💡 <b>Savdo maslahati:</b> Uzum Market'da narxni belgilashda komissiya, logistika va 1% soliqni hisobga oling — Oqila kalkulyatori minimal foydali narxni ko'rsatadi. Amaldagi tariflarni sotuvchi kabinetida tekshiring.",
+    "🧵 <b>Hunarmand qizlar uchun:</b> «Hunarmand» uyushmasi a'zolari uchun imtiyozlar mavjud — amaldagi soliq imtiyozlarini uyushma va soliq.uz orqali aniqlang. O'z-o'zini band qilganlar uchun 2026-yildan aylanmadan soliq 1%.",
+    "📸 <b>Vizual marketing:</b> Instagram va Telegram kanalda mahsulotni faqat oq fonda emas, balki 'hayotiy' muhitda (masalan, kiyimni qizlar kiygan holda, dasturxonni bezatilgan holda) ko'rsatish sotuvni sezilarli oshiradi.",
     "📦 <b>Qayta sotish (Xitoy/bozor):</b> E'tibor bering! Xitoydan yoki ulgurji bozordan olib qayta sotishda o'z-o'zini band qilish QONUN BO'YICHA TAQIQLANGAN. Jarimaga tushmaslik uchun YaTT (yagona 1% soliq) ochish shart.",
     "💳 <b>To'lov tizimlari:</b> Telegram bot yoki Instagram do'konda Click va Payme ulash — xaridor ishonchini 2 barobar oshiradi. Click/Payme ekvayring komissiyasi odatda 1.5% ni tashkil qiladi.",
     "🏷️ <b>Xaridorni jalb qilish:</b> Narxni 199 000 so'm yoki 249 000 so'm qilib belgilash (psixologik narxlash) yaxlit 200 000 yoki 250 000 so'mdan ko'ra 15% ko'proq buyurtma olib keladi.",
 ]
 
 DAILY_TIPS_RU = [
-    "💡 <b>Совет по продажам:</b> Продавая на Uzum Market, закладывайте в цену наценку не менее 25-30%. Это покроет комиссию маркетплейса (~12-14%) и логистику, оставляя вам чистую прибыль.",
-    "🧵 <b>Для мастериц и ремесленниц:</b> Члены ассоциации «Хунарманд» полностью освобождены от налога с оборота (0%)! Для остальных самозанятых с 2026 г. действует ставка 1%.",
-    "📸 <b>Визуальный маркетинг:</b> В соцсетях и Telegram показывайте товар в реальной обстановке (одежду на модели, декор в интерьере) — это повышает конверсию на 40%.",
+    "💡 <b>Совет по продажам:</b> Назначая цену на Uzum Market, учитывайте комиссию, логистику и налог 1% — калькулятор Oqila покажет минимальную выгодную цену. Актуальные тарифы смотрите в кабинете продавца.",
+    "🧵 <b>Для мастериц и ремесленниц:</b> У членов ассоциации «Хунарманд» есть льготы — действующие налоговые льготы уточните в ассоциации и на soliq.uz. Для самозанятых с 2026 г. ставка налога с оборота — 1%.",
+    "📸 <b>Визуальный маркетинг:</b> В соцсетях и Telegram показывайте товар в реальной обстановке (одежду на модели, декор в интерьере) — так покупателю проще представить вещь, и это помогает продажам.",
     "📦 <b>Перепродажа (Китай/рынки):</b> Важно! Перепродавать чужие покупные товары в статусе самозанятого ЗАПРЕЩЕНО законом. Оформите ЯТТ (налог с оборота 1%), чтобы избежать штрафов.",
     "💳 <b>Приём платежей:</b> Подключение Click и Payme повышает доверие покупателей в 2 раза. Комиссия эквайринга составляет около 1.5%.",
     "🏷️ <b>Психология цен:</b> Цены 199 000 или 249 000 сум привлекают на 15% больше заказов, чем круглые суммы 200 000 или 250 000 сум.",
 ]
 
 TAX_CALENDAR_TEXT_UZ = (
-    "📅 <b>O'zbekiston 2026 — Kichik biznes va YaTT Soliq Taqvimi:</b>\n\n"
+    "📅 <b>O'zbekiston 2026 — YaTT va o'z-o'zini band qilganlar uchun soliq taqvimi:</b>\n\n"
     "📌 <b>Har oyning 15-sanasigacha:</b>\n"
-    "• YaTT uchun majburiy ijtimoiy soliq — 1 BHM (440 000 so'm). Soliq mobil ilovasi orqali to'lanadi.\n\n"
-    "📌 <b>Chorak yakuni bo'yicha (har 3 oyda):</b>\n"
-    "• Aylanmadan olinadigan soliq (yagona 1% stavka, SK 467-modda) — chorakdan keyingi oyning 15-sanasigacha.\n\n"
+    "• YaTT majburiy ijtimoiy solig'i — kamida 1 BHM (440 000 so'm), joriy oy uchun (SK 408-modda).\n"
+    "• Aylanmadan soliq (1%, SK 467-modda) — o'tgan oy uchun hisobot va to'lov (SK 470-modda).\n\n"
+    "📌 <b>15-fevralgacha:</b>\n"
+    "• Aylanmadan soliq bo'yicha yillik hisob-kitob.\n\n"
     "📌 <b>O'z-o'zini band qilganlar:</b>\n"
-    "• Aylanmadan olinadigan soliq — 1% (2026-yildan joriy etilgan, SK 467-modda).\n"
-    "• Pensiya staji uchun ijtimoiy soliq — yil davomida ixtiyoriy 1 BHM.\n\n"
-    "⚠️ <b>Yillik aylanma 1 mlrd so'mdan oshsa:</b>\n"
-    "QQS (12%) to'lovchisi sifatida ro'yxatdan o'tish majburiyati vujudga keladi."
+    "• Aylanmadan soliq — 1% (2026-yildan, 100 mln so'mgacha imtiyoz bekor qilingan).\n"
+    "• Staj uchun ijtimoiy soliq — ixtiyoriy, yiliga kamida 1 BHM.\n\n"
+    "⚠️ <b>Yillik daromad 12 000 BHMdan (≈5,28 mlrd so'm) oshsa:</b>\n"
+    "QQS va foyda solig'iga majburiy o'tiladi (PF-100, 2026-yil 1-iyundan).\n\n"
+    "<i>Muddatlarni soliq.uz saytida tekshiring.</i>"
 )
 
 TAX_CALENDAR_TEXT_RU = (
-    "📅 <b>Узбекистан 2026 — Налоговый календарь для малого бизнеса и ЯТТ:</b>\n\n"
+    "📅 <b>Узбекистан 2026 — налоговый календарь ЯТТ и самозанятых:</b>\n\n"
     "📌 <b>Каждый месяц до 15-го числа:</b>\n"
-    "• Обязательный соцналог для ЯТТ — 1 БРВ (440 000 сум). Оплачивается через приложение Soliq.\n\n"
-    "📌 <b>По итогам квартала (каждые 3 месяца):</b>\n"
-    "• Налог с оборота (единая ставка 1%, ст. 467 НК РУз) — до 15-го числа месяца, следующего за кварталом.\n\n"
-    "📌 <b>Самозанятые лица:</b>\n"
-    "• Налог с оборота — 1% (с 1 января 2026 г., ст. 467 НК РУз).\n"
-    "• Соцналог для трудового стажа — добровольно 1 БРВ в год.\n\n"
-    "⚠️ <b>При годовом обороте свыше 1 млрд сум:</b>\n"
-    "Возникает обязательство перехода на НДС (12%) и налог на прибыль."
+    "• Обязательный соцналог ЯТТ — не менее 1 БРВ (440 000 сум) за текущий месяц (ст. 408 НК).\n"
+    "• Налог с оборота (1%, ст. 467 НК) — отчёт и уплата за прошлый месяц (ст. 470 НК).\n\n"
+    "📌 <b>До 15 февраля:</b>\n"
+    "• Годовой расчёт по налогу с оборота.\n\n"
+    "📌 <b>Самозанятые:</b>\n"
+    "• Налог с оборота — 1% (с 2026 г., освобождение до 100 млн сум отменено).\n"
+    "• Соцналог для стажа — добровольно, не менее 1 БРВ в год.\n\n"
+    "⚠️ <b>При годовом доходе свыше 12 000 БРВ (≈5,28 млрд сум):</b>\n"
+    "обязательный переход на НДС и налог на прибыль (УП-100, с 1 июня 2026 г.).\n\n"
+    "<i>Сверяйте сроки на soliq.uz.</i>"
 )
 
 LANG_SELECTION_TEXT = (
