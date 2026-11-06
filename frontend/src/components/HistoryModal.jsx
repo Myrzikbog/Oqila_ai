@@ -41,7 +41,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
         (data.items || []).map((item) => ({
           ...item,
           // a poster is drawn on demand from its saved settings; show it instead of the raw AI scene
-          studio_photo_url: withToken(item.poster_url || item.studio_photo_url),
+          studio_photo_url: withToken(item.info_config && item.studio_photo_url ? item.studio_photo_url : (item.poster_url || item.studio_photo_url)),
         })),
       );
     } catch (err) {

@@ -31,12 +31,17 @@ import { hapticImpact, hapticNotify, openTelegramShare } from '../utils/telegram
 import { fireConfetti } from '../utils/confetti';
 import { OutputTypePicker, StylePicker } from './studio/StylePicker';
 import PosterEditor from './studio/PosterEditor';
+import InfoCardView from './studio/InfoCardView';
 import { L as STUDIO_L } from './studio/labels';
 
 // Used until /api/photoshoot-presets answers (and if it never does): the original photo styles only.
 const FALLBACK_REGISTRY = {
-  groups: [{ id: 'photo', icon: 'camera', ru: 'Фото товара', uz: 'Mahsulot surati', hint_ru: 'Красивая сцена вокруг вашего товара', hint_uz: 'Mahsulot atrofida chiroyli sahna' }],
+  groups: [
+    { id: 'uzum', icon: 'shopping', tier: 'main', ru: 'Фото для Uzum', uz: 'Uzum uchun surat', hint_ru: 'Чистое фото на белом фоне, 3:4', hint_uz: 'Oq fonda toza surat, 3:4' },
+    { id: 'photo', icon: 'camera', ru: 'Фото товара', uz: 'Mahsulot surati', hint_ru: 'Красивая сцена вокруг вашего товара', hint_uz: 'Mahsulot atrofida chiroyli sahna', tier: 'extra' },
+  ],
   styles: [
+    { id: 'uzum_clean', group: 'uzum', icon: 'shopping', layout: null, featured: true, kind: 'clean', ru: 'Белый фон', uz: 'Oq fon', tag_ru: 'Uzum', tag_uz: 'Uzum' },
     { id: 'minimal_studio', group: 'photo', icon: 'camera', layout: null, featured: true, ru: 'Студийный свет', uz: 'Studiya nuri', tag_ru: 'Каталог', tag_uz: 'Katalog' },
     { id: 'uzbek_heritage', group: 'photo', icon: 'sparkles', layout: null, featured: true, ru: 'Восточный колорит', uz: 'Sharq ruhi', tag_ru: 'Икат/Атлас', tag_uz: 'Ikat/Atlas' },
     { id: 'uzum_catalog', group: 'photo', icon: 'shopping', layout: null, featured: true, ru: 'Uzum (белый фон)', uz: 'Uzum (oq fon)', tag_ru: 'Маркетплейс', tag_uz: 'Marketpleys' },
@@ -58,8 +63,9 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   
   // What to make: output type (photo / poster / promo / marketplace / story), its style and optional wishes
   const [registry, setRegistry] = useState(registryCache || FALLBACK_REGISTRY);
-  const [outputGroup, setOutputGroup] = useState('photo');
-  const [photoshootStyle, setPhotoshootStyle] = useState('minimal_studio');
+  const [outputGroup, setOutputGroup] = useState('uzum');
+  const [photoshootStyle, setPhotoshootStyle] = useState('uzum_clean');
+  const [infoText, setInfoText] = useState('');
   const [extraWishes, setExtraWishes] = useState('');
   const [contentTone, setContentTone] = useState('luxury');
   const [contentFormat, setContentFormat] = useState('instagram');
@@ -83,6 +89,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
 
   const groupStyles = registry.styles.filter((st) => st.group === outputGroup);
   const currentStyle = registry.styles.find((st) => st.id === photoshootStyle);
+  const isMain = outputGroup === 'uzum' || outputGroup === 'info';
 
   const handleGroupSelect = (groupId) => {
     setOutputGroup(groupId);
@@ -127,9 +134,13 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
 
   useEffect(() => {
     if (externalCardToLoad) {
-      const card = externalCardToLoad.has_poster && externalCardToLoad.poster_config
-        ? { ...externalCardToLoad, poster: externalCardToLoad.poster_config, poster_has_scene: externalCardToLoad.poster_has_scene }
-        : externalCardToLoad;
+      const ec = externalCardToLoad;
+      let card = ec;
+      if (ec.info_config && ec.studio_photo_url) {
+        card = { ...ec, info: ec.info_config, poster: ec.poster_config || null, display: 'photo' };
+      } else if (ec.has_poster && ec.poster_config) {
+        card = { ...ec, poster: ec.poster_config, poster_has_scene: ec.poster_has_scene, display: 'poster' };
+      }
       setResult(card);
       setIsFormCollapsed(true);
       if (externalCardToLoad.studio_photo_url) {
@@ -190,8 +201,9 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     setCostPrice('');
     setDesiredPrice('');
     setNote('');
-    setOutputGroup('photo');
-    setPhotoshootStyle('minimal_studio');
+    setOutputGroup('uzum');
+    setPhotoshootStyle('uzum_clean');
+    setInfoText('');
     setExtraWishes('');
     setResult(null);
     setErrorMessage('');
@@ -273,7 +285,8 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     if (extraWishes.trim()) formData.append('photoshoot_prompt', extraWishes.trim());
     formData.append('content_tone', contentTone);
     formData.append('content_format', contentFormat);
-    formData.append('generate_photo', generatePhoto ? 'true' : 'false');
+    formData.append('generate_photo', (generatePhoto || isMain) ? 'true' : 'false');
+    if (outputGroup === 'info' && infoText.trim()) formData.append('info_text', infoText.trim());
     if (userId) formData.append('user_id', userId);
 
     try {
@@ -291,11 +304,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
       setErrorMessage('');
       setLoadingProgress(100);
       setIsFormCollapsed(true);
-      if (data.studio_photo_url) {
-        setActivePhotoView('studio');
-      } else {
-        setActivePhotoView('original');
-      }
+      setActivePhotoView(data.studio_photo_url ? 'studio' : 'original');
       hapticNotify('success');
       fireConfetti();
       setTimeout(() => {
@@ -543,7 +552,29 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
             <OutputTypePicker groups={registry.groups} value={outputGroup} onChange={handleGroupSelect} lang={lang} />
           )}
 
+          {/* Uzum / info: always AI, short notes instead of the toggle */}
+          {isMain && (
+            <p className="text-[11px] leading-snug text-slate-600 dark:text-slate-300 p-3 rounded-xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/50">
+              {outputGroup === 'uzum' ? sl.uzum_note : sl.info_wait}
+            </p>
+          )}
+          {outputGroup === 'info' && (
+            <label className="block space-y-1">
+              <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">{sl.facts_label}</span>
+              <textarea
+                value={infoText}
+                onChange={(e) => setInfoText(e.target.value)}
+                rows={4}
+                maxLength={600}
+                placeholder={sl.facts_placeholder}
+                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white resize-none"
+              />
+              <span className="block text-[10px] leading-snug text-slate-500 dark:text-slate-400">{sl.facts_hint}</span>
+            </label>
+          )}
+
           {/* AI Photoshoot Toggle (when image is uploaded) */}
+          {!isMain && (
           <div className="p-3 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/50 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
               <Camera className="w-4 h-4 text-brand-600 dark:text-teal-400 flex-shrink-0" />
@@ -569,6 +600,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-brand-600 dark:peer-checked:bg-teal-500"></div>
             </label>
           </div>
+          )}
 
           {/* Output type, then the styles that belong to it */}
           {(generatePhoto || outputGroup !== 'photo') && (
@@ -827,7 +859,21 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
           </div>
 
           {/* Photo Section: AI Studio Shoot + Original Toggle */}
-          {result.poster && registry.layouts[result.poster.layout] ? (
+          {result.ai_fallback && (
+            <p role="alert" className="flex gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-xs font-semibold text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span>{result.ai_fallback === 'quota' ? sl.ai_fallback_quota : sl.ai_fallback_error}</span>
+            </p>
+          )}
+          {result.info && result.studio_photo_url && result.display !== 'poster' ? (
+            <InfoCardView
+              key={`${result.id}-${result.studio_photo_url.length}`}
+              card={result}
+              registry={registry}
+              lang={lang}
+              onUpdate={(patch) => setResult((r) => ({ ...r, ...patch }))}
+            />
+          ) : result.poster && registry.layouts[result.poster.layout] ? (
             <PosterEditor key={result.id} card={result} registry={registry} lang={lang} />
           ) : (result.studio_photo_url || imagePreview) && (
             <div className="space-y-2">

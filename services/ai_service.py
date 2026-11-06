@@ -14,9 +14,12 @@ import base64
 import json
 import logging
 import os
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
-from services.presets import ASPECTS, DEFAULT_ASPECT, STYLES_BY_ID, STYLES, build_scene_prompt
+from services.imaging import finalize_card, to_data_url
+from services.info_photo import InfoSpec, build_info_prompt, build_spec, expected_strings, find_missing, find_unexpected
+from services.poster import poster_defaults
+from services.presets import ASPECTS, DEFAULT_ASPECT, STYLES_BY_ID, STYLES, build_scene_prompt, style_kind
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +158,7 @@ class AIService:
         generate_photo: bool = True,
         force_mock: bool = False,
         aspect_ratio: str = DEFAULT_ASPECT,
+        info_text: Optional[str] = None,
     ) -> dict:
         """
         Generate a product marketing card using Gemini Vision & optional AI Photoshoot.
@@ -177,10 +181,15 @@ class AIService:
                 content_format=content_format,
                 generate_photo=generate_photo,
                 aspect_ratio=aspect_ratio,
+                info_text=info_text,
             )
         except Exception as exc:
             logger.error("Gemini API error, falling back to mock: %s", exc)
-            return self._mock_response(lang, cost_price, desired_price, note)
+            result = self._mock_response(lang, cost_price, desired_price, note)
+            # The sample text is not about the seller's product: tell the client, so it can say so
+            text = str(exc)
+            result["ai_fallback"] = "quota" if any(k in text for k in ("RESOURCE_EXHAUSTED", "402", "429", "quota")) else "error"
+            return result
 
     # -----------------------------------------------------------------------
     # Public: legal Q&A chat
@@ -322,6 +331,36 @@ Rules:
     # -----------------------------------------------------------------------
     # Internal: AI Studio Photoshoot Image Generation
     # -----------------------------------------------------------------------
+    @staticmethod
+    def _image_models() -> List[str]:
+        """Primary image model, then a fallback: `gemini-3.1-flash-image` spells Russian/Uzbek text correctly,
+        the older `gemini-2.5-flash-image` does not (it produced 'Безогсасная'), so it is only a safety net."""
+        models = [os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"), os.getenv("GEMINI_IMAGE_FALLBACK_MODEL", "gemini-2.5-flash-image")]
+        return [m for i, m in enumerate(models) if m and m not in models[:i]]
+
+    async def _generate_image_bytes(self, contents: Any, aspect_ratio: str = DEFAULT_ASPECT) -> Optional[bytes]:
+        """Raw bytes of one generated picture (PNG/JPEG) or None; tries the fallback model if the first one fails."""
+        from google.genai import types as gtypes  # type: ignore
+
+        config = gtypes.GenerateContentConfig(
+            response_modalities=["IMAGE"],
+            image_config=gtypes.ImageConfig(aspect_ratio=ASPECTS.get(aspect_ratio, ASPECTS[DEFAULT_ASPECT])["model"]),
+        )
+        loop = self._get_loop()
+        for model in self._image_models():
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda m=model: self._client.models.generate_content(model=m, contents=contents, config=config),
+                )
+                for part in response.parts or []:
+                    if part.inline_data and part.inline_data.data:
+                        return part.inline_data.data
+                logger.warning("Image model %s returned no picture", model)
+            except Exception as exc:
+                logger.warning("Image model %s failed: %s", model, exc)
+        return None
+
     async def generate_studio_photo(
         self,
         image_bytes: Optional[bytes] = None,
@@ -334,7 +373,7 @@ Rules:
         """
         Generate a commercial studio photoshoot image based on uploaded item or description.
         Supports both image-to-image and text-to-image with customizable prompts.
-        Returns a base64 data URI (data:image/jpeg;base64,...) or None.
+        Returns a base64 data URI or None. "Clean" Uzum styles are finished to 1080x1440 JPEG with a pure white background.
         """
         if self.is_mock or not self._client:
             return None
@@ -359,38 +398,101 @@ Rules:
             if product_description and not image_bytes and product_description.lower() not in final_prompt.lower():
                 final_prompt = f"Commercial product photoshoot of {product_description}. {final_prompt}"
 
-            config = gtypes.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-                image_config=gtypes.ImageConfig(aspect_ratio=ASPECTS.get(aspect_ratio, ASPECTS[DEFAULT_ASPECT])["model"]),
-            )
-
             if image_bytes:
-                part = gtypes.Part.from_bytes(data=image_bytes, mime_type=image_mime or "image/jpeg")
-                contents = [part, final_prompt]
+                contents: Any = [gtypes.Part.from_bytes(data=image_bytes, mime_type=image_mime or "image/jpeg"), final_prompt]
             else:
                 contents = final_prompt
 
-            # Run in executor to keep async loop non-blocking
-            loop = self._get_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self._client.models.generate_content(
-                    model="gemini-2.5-flash-image",
-                    contents=contents,
-                    config=config,
-                ),
-            )
-
-            for p in response.parts:
-                if p.inline_data and p.inline_data.data:
-                    b64 = base64.b64encode(p.inline_data.data).decode("utf-8")
-                    mime = p.inline_data.mime_type or "image/jpeg"
-                    return f"data:{mime};base64,{b64}"
+            raw = await self._generate_image_bytes(contents, aspect_ratio)
+            if not raw:
+                return None
+            if style_kind(style_preset) == "clean":
+                return to_data_url(finalize_card(raw, whiten=style_preset == "uzum_clean"))
+            return "data:image/png;base64," + base64.b64encode(raw).decode("utf-8")
 
         except Exception as exc:
             logger.warning("Could not generate studio photo: %s", exc)
 
         return None
+
+    # -----------------------------------------------------------------------
+    # Information cards: AI draws the text, a second AI call reads it back, mistakes trigger a retry
+    # -----------------------------------------------------------------------
+    async def read_image_text(self, image_png: bytes) -> List[str]:
+        """Text visible in a picture, read by a vision model (lossless PNG and a strict prompt give complete results)."""
+        from google.genai import types as gtypes  # type: ignore
+
+        prompt = (
+            "You are an OCR engine. Scan the WHOLE image systematically from top to bottom, including small captions under "
+            "icons, text at the very bottom and at the edges, and text inside decorative elements. Transcribe every piece of "
+            "text exactly letter by letter as written; never correct spelling, never skip anything. "
+            'Return JSON: {"lines": ["..."]}.'
+        )
+        loop = self._get_loop()
+        model = os.getenv("GEMINI_VERIFY_MODEL", "gemini-2.5-flash")
+        response = await loop.run_in_executor(
+            None,
+            lambda: self._client.models.generate_content(
+                model=model,
+                contents=[gtypes.Part.from_bytes(data=image_png, mime_type="image/png"), prompt],
+                config=gtypes.GenerateContentConfig(response_mime_type="application/json", temperature=0),
+            ),
+        )
+        data = json.loads(response.text or "{}")
+        lines = data.get("lines", []) if isinstance(data, dict) else data
+        return [x if isinstance(x, str) else json.dumps(x, ensure_ascii=False) for x in lines]
+
+    async def generate_info_photo(
+        self,
+        image_bytes: bytes,
+        image_mime: str,
+        style_id: str,
+        spec: InfoSpec,
+        aspect_ratio: str = "3:4",
+        max_attempts: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        An information card for `spec`. Returns {"photo_url", "verified", "missing", "unexpected", "attempts"}; photo_url is None
+        if no picture could be produced. verified=True means every requested string was read back from the picture,
+        False means some are missing even after retries (the best attempt is returned), None means the check itself failed.
+        """
+        from google.genai import types as gtypes  # type: ignore
+
+        part = gtypes.Part.from_bytes(data=image_bytes, mime_type=image_mime or "image/jpeg")
+        expected = expected_strings(spec, style_id)
+        best: Optional[tuple] = None
+        retry_missing: Optional[List[str]] = None
+        verified: Optional[bool] = None
+        attempts = 0
+        for attempt in range(1, max_attempts + 1):
+            attempts = attempt
+            raw = await self._generate_image_bytes([part, build_info_prompt(style_id, spec, aspect_ratio, retry_missing)], aspect_ratio)
+            if not raw:
+                continue
+            try:
+                lines = await self.read_image_text(raw)
+                missing = find_missing(lines, expected)
+                unexpected = find_unexpected(lines, expected)
+                verified = not missing
+            except Exception as exc:
+                logger.warning("Could not verify the text of an info card: %s", exc)
+                best, verified = (0, raw, [], []), None
+                break
+            if best is None or len(missing) < len(best[2]):
+                best = (len(missing), raw, missing, unexpected)
+            if not missing:
+                break
+            retry_missing = missing
+        if best is None:
+            return {"photo_url": None, "verified": False, "missing": expected, "unexpected": [], "attempts": attempts}
+        _, raw, missing, unexpected = best
+        return {
+            "photo_url": to_data_url(finalize_card(raw)),
+            "verified": verified if verified is None else not missing,
+            "missing": missing,
+            "unexpected": unexpected,
+            "attempts": attempts,
+        }
 
     # -----------------------------------------------------------------------
     # Internal: Concurrent Gemini Vision & Photoshoot execution
@@ -409,6 +511,7 @@ Rules:
         content_format: str = "instagram",
         generate_photo: bool = True,
         aspect_ratio: str = DEFAULT_ASPECT,
+        info_text: Optional[str] = None,
     ) -> dict:
         from google.genai import types as gtypes  # type: ignore
 
@@ -440,8 +543,20 @@ Return ONLY valid JSON with this exact structure:
   "description": "Selling description 120-220 words. Highlight real features of this specific item, materials, durability/style, usage ideas. End with ordering info.",
   "price_tag": "Formatted price string, e.g. '💰 Narx: 380,000 so'm' or '💰 Цена: 380 000 сум'",
   "hashtags": ["#tag1", "#tag2", ...],  // 8-12 relevant hashtags
-  "marketing_tip": "One specific actionable marketing and sales tip for Instagram/Telegram tailored to this product category (80-120 words)"
+  "marketing_tip": "One specific actionable marketing and sales tip for Instagram/Telegram tailored to this product category (80-120 words)",
+  "info": {{
+    "title": "Plain descriptive product name for a card heading: what it is plus one visible attribute, max 40 chars, no emoji, no quotes. NEVER invent a brand, collection or proper name",
+    "tagline": "Three neutral words about the look or mood separated by ' · ', e.g. 'Нарядный · Яркий · Ручной'. No superlatives, no quality claims",
+    "benefits": ["3 or 4 very short benefits, max 34 chars each"],
+    "badge": "An empty string, unless the seller notes clearly support a short badge (e.g. 'Ручная работа' only if the seller says it is handmade)",
+    "uses": ["up to 4 captions of 1-2 words, max 14 chars each, e.g. 'НА СТОЛ' / 'В ПОДАРОК'"]
+  }}
 }}
+
+STRICT RULE for the "info" block: it is printed on a product photo, so it must contain ONLY facts that are clearly visible in
+the image or stated in the seller's notes. NEVER invent sizes, weights, materials, certificates, guarantees, discounts or any
+other numbers, and never use promises or superlatives such as premium, best, №1, highest quality, guaranteed, exclusive, 100%.
+If unsure, use general words about look and mood (colour, style, gift idea).
 """
 
         # Build input parts for text analysis
@@ -461,6 +576,8 @@ Return ONLY valid JSON with this exact structure:
             context_parts.append(f"Желаемая цена/Maqsadli narx: {desired_price:,.0f} сум/so'm")
         if note:
             context_parts.append(f"Описание изделия/Tavsif: {note}")
+        if info_text and info_text.strip():
+            context_parts.append(f"Факты от продавца (используй только их для размеров и характеристик):\n{info_text.strip()[:1500]}")
         if photoshoot_prompt:
             context_parts.append(f"Стиль съёмки/Промпт: {photoshoot_prompt}")
 
@@ -507,6 +624,23 @@ Return ONLY valid JSON with this exact structure:
                     aspect_ratio=aspect_ratio,
                 )
             return None
+
+        if style_kind(photoshoot_style) == "ai_text":
+            # The card needs the text first (title, benefits), so text and picture run one after the other.
+            text_result = await text_worker()
+            for key in ("title", "description", "price_tag", "hashtags", "marketing_tip"):
+                text_result.setdefault(key, "")
+            spec = build_spec(
+                text_result.get("info") or {}, info_text, poster_defaults(text_result, None, lang)["title"], lang, allowed_text=note
+            )
+            if generate_photo and image_bytes:
+                info = await self.generate_info_photo(image_bytes, image_mime, photoshoot_style, spec, aspect_ratio)
+            else:
+                info = {"photo_url": None, "verified": None, "missing": [], "unexpected": [], "attempts": 0}
+            text_result["studio_photo_url"] = info.pop("photo_url")
+            text_result["info"] = {**spec.to_dict(), **info}
+            text_result["photoshoot_style"] = photoshoot_style
+            return text_result
 
         # Execute text analysis and photoshoot image generation concurrently!
         text_result, studio_photo_url = await asyncio.gather(text_worker(), photo_worker())

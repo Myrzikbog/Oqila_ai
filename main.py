@@ -58,6 +58,7 @@ from services.database import (
     save_generated_card,
     set_brand_logo,
     set_card_poster_config,
+    update_card_info,
     toggle_favorite,
     toggle_user_active,
     update_user_profile,
@@ -70,7 +71,9 @@ from services.legal_calc import (
 )
 from services.media_storage import delete_photo, resolve_photo, store_bytes
 from services.poster import PosterSpec, normalize_logo, normalize_source, poster_defaults, poster_to_png, render_poster
-from services.presets import ASPECTS, STYLES_BY_ID, default_aspect, needs_overlay, layout_for, public_registry
+from services.info_photo import InfoSpec, build_spec
+from services.poster import format_price
+from services.presets import ASPECTS, STYLES_BY_ID, default_aspect, needs_overlay, layout_for, public_registry, style_kind
 from services.rate_limit import check_user_limit, global_ai_budget_exhausted
 from services.telegram_service import telegram_service
 
@@ -450,6 +453,7 @@ async def generate_card(
     content_format: str = Form("instagram"),
     generate_photo: bool = Form(True),
     aspect_ratio: str = Form(""),
+    info_text: str = Form(""),
     user_id: Optional[int] = Form(None),  # ignored: the user always comes from the session token
     user: dict = Depends(current_user),
 ):
@@ -468,6 +472,8 @@ async def generate_card(
         photoshoot_style = "minimal_studio"
     aspect = aspect_ratio if aspect_ratio in ASPECTS else default_aspect(photoshoot_style)
     overlay = needs_overlay(photoshoot_style)  # poster styles: the server draws the text over the picture
+    kind = style_kind(photoshoot_style)
+    info_text = " ".join(info_text.split("\r")).strip()[:1500]
     image_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
 
@@ -514,17 +520,33 @@ async def generate_card(
         generate_photo=generate_photo,
         force_mock=use_mock,
         aspect_ratio=aspect,
+        info_text=info_text,
     )
 
-    # Poster styles keep the seller's own photo (fallback background in offline mode) and a text config
+    # Posters, information cards and clean photos keep the seller's own photo (fallback background, re-generation)
     source_ref: Optional[str] = None
     poster_config: Optional[dict] = None
-    if overlay:
+    info_config: Optional[dict] = None
+    if overlay or kind in ("ai_text", "clean"):
         if image_bytes:
             try:
                 source_ref = store_bytes("source", normalize_source(image_bytes), "jpg")
             except ValueError:
                 source_ref = None
+    if kind == "ai_text":
+        info_config = result.get("info")
+        if not info_config:  # offline mode: no AI card, only the seller's own facts and the card's text
+            defaults = poster_defaults(result, None, lang)
+            spec = build_spec({"benefits": defaults["bullets"]}, info_text, defaults["title"], lang, allowed_text=note)
+            info_config = {**spec.to_dict(), "verified": None, "missing": [], "unexpected": [], "attempts": 0}
+            result["info"] = info_config
+        brand = get_brand(user_id)
+        poster_config = _info_poster_config(info_config, brand, desired_price, lang)
+        result["poster"] = poster_config
+        result["poster_has_scene"] = False
+        result["poster_url"] = None  # set below once the card id is known
+        result["display"] = "photo" if result.get("studio_photo_url") else "poster"
+    elif overlay:
         brand = get_brand(user_id)
         poster_config = PosterSpec.from_dict({
             "layout": layout_for(photoshoot_style),
@@ -537,6 +559,7 @@ async def generate_card(
             "show_logo": bool(brand["brand_logo"]),
             **poster_defaults(result, desired_price, lang),
         }).to_dict()
+        result["display"] = "poster"
 
     # Save to history database
     card_id = save_generated_card(
@@ -556,9 +579,12 @@ async def generate_card(
         user_id=user_id,
         source_photo_url=source_ref,
         poster_config=poster_config,
+        info_config=info_config,
     )
     result["id"] = card_id
-    if poster_config:
+    if kind == "ai_text" and poster_config:
+        result["poster_url"] = f"/api/cards/{card_id}/poster.png"
+    elif poster_config:
         # The picture is drawn on demand from the config: no need to ship the raw AI scene to the client
         result["poster_has_scene"] = bool(result.get("studio_photo_url"))
         result["studio_photo_url"] = None
@@ -767,6 +793,18 @@ class BrandRequest(BaseModel):
     brand_contact: str = ""
 
 
+def _info_poster_config(info: dict, brand: dict, desired_price: Optional[float], lang: str) -> dict:
+    """The exact-text alternative of an information card: the same facts on a server-drawn "callouts" poster."""
+    bullets = list(info.get("benefits") or []) + [f"{s['name']}: {s['value']}" for s in (info.get("specs") or [])]
+    return PosterSpec.from_dict({
+        "layout": "callouts", "aspect": "3:4",
+        "palette": "custom" if brand["brand_color"] else "brand", "brand_color": brand["brand_color"],
+        "lang": lang, "title": info.get("title", ""), "bullets": bullets[:4],
+        "price": format_price(desired_price, lang), "contact": brand["brand_contact"], "brand_name": brand["brand_name"],
+        "show_logo": bool(brand["brand_logo"]),
+    }).to_dict()
+
+
 def _open_image(ref: Optional[str]):
     """Open a stored picture (file reference or legacy inline data URL) as a PIL image, or None."""
     import base64
@@ -832,6 +870,55 @@ async def get_card_poster(card_id: int, user: dict = Depends(current_user_for_me
         raise HTTPException(status_code=404, detail="Poster not found")
     png = await _render_card_poster(card, json.loads(card["poster_config"]))
     return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, max-age=60"})
+
+
+class InfoSpecItem(BaseModel):
+    name: str = ""
+    value: str = ""
+
+
+class InfoRequest(BaseModel):
+    title: Optional[str] = None
+    tagline: Optional[str] = None
+    benefits: Optional[List[str]] = Field(default=None, max_length=8)
+    specs: Optional[List[InfoSpecItem]] = Field(default=None, max_length=8)
+    badge: Optional[str] = None
+    uses: Optional[List[str]] = Field(default=None, max_length=8)
+    style: Optional[str] = None
+    lang: Optional[str] = None
+
+
+@app.post("/api/cards/{card_id}/info-photo")
+async def regenerate_info_photo(card_id: int, req: InfoRequest, user: dict = Depends(current_user)):
+    """Draw the information card again with the seller's edited text (and optionally another template)."""
+    card = get_card_for_poster(card_id, user["user_id"])
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+    style = req.style if req.style in STYLES_BY_ID else card.get("photoshoot_style")
+    if style_kind(style) != "ai_text":
+        raise HTTPException(status_code=400, detail="This card is not an information card")
+    lang = req.lang or card.get("lang") or "ru"
+    limit_error = check_user_limit("generate_card", user["user_id"], lang)
+    if limit_error:
+        raise HTTPException(status_code=429, detail=limit_error)
+    if ai_service.is_mock or global_ai_budget_exhausted():
+        raise HTTPException(status_code=503, detail="AI is not available right now. Use the exact-text version.")
+    source = resolve_photo(card.get("source_photo_url"))
+    if not source:
+        raise HTTPException(status_code=409, detail="The original photo of this card is no longer stored")
+
+    spec = InfoSpec.from_dict({**req.model_dump(exclude_none=True), "specs": [s.model_dump() for s in (req.specs or [])], "lang": lang})
+    info = await ai_service.generate_info_photo(source.read_bytes(), "image/jpeg", style, spec)
+    if not info["photo_url"]:
+        raise HTTPException(status_code=502, detail="The picture could not be generated. Try again.")
+    photo_url = info.pop("photo_url")
+    config = {**spec.to_dict(), **info}
+    poster_cfg = _info_poster_config(config, get_brand(user["user_id"]), card.get("desired_price"), lang)
+    old_photo = update_card_info(card_id, user["user_id"], photo_url, config, poster_cfg, style)
+    if old_photo:
+        delete_photo(old_photo)
+    log_event(event_type="generate_card", lang=lang, is_mock=False, details={"card_id": card_id, "style": style, "regenerated": True}, user_id=user["user_id"])
+    return {"studio_photo_url": photo_url, "info": config, "poster": poster_cfg, "photoshoot_style": style}
 
 
 def _brand_response(user_id: int) -> dict:

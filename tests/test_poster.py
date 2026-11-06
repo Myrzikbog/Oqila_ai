@@ -58,9 +58,12 @@ def test_registry_is_consistent():
         assert style["group"] in group_ids
         if style["layout"]:
             assert style["layout"] in LAYOUTS and LAYOUTS[style["layout"]]["group"] == style["group"]
-        if style["id"] != "custom":
+        if style["id"] != "custom" and style.get("kind") != "ai_text":
             assert style["prompt"].strip(), style["id"]
             assert style["prompt"].isascii(), f"prompt of {style['id']} must be plain English"
+        if style.get("kind") == "ai_text":
+            from services.info_photo import BRIEFS, SLOTS
+            assert style["id"] in BRIEFS and style["id"] in SLOTS, f"info style {style['id']} needs a brief and slots"
         for key in ("ru", "uz", "hint_ru", "hint_uz"):
             assert key in style
     for layout, info in LAYOUTS.items():

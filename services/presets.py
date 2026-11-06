@@ -13,19 +13,25 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from services.info_photo import SLOTS as INFO_SLOTS
+
 # ---------------------------------------------------------------------------
 # Output types shown as big cards in the Studio ("what do you want to get?")
 # ---------------------------------------------------------------------------
 GROUPS: List[Dict[str, Any]] = [
-    {"id": "photo", "icon": "camera", "ru": "Фото товара", "uz": "Mahsulot surati",
-     "hint_ru": "Красивая сцена вокруг вашего товара", "hint_uz": "Mahsulot atrofida chiroyli sahna"},
-    {"id": "poster", "icon": "layout", "ru": "Плакат", "uz": "Plakat",
-     "hint_ru": "Товар + название, цена, преимущества", "hint_uz": "Mahsulot + nom, narx, afzalliklar"},
-    {"id": "promo", "icon": "percent", "ru": "Акция", "uz": "Aksiya",
+    # main: what sells on Uzum
+    {"id": "uzum", "tier": "main", "icon": "shopping", "ru": "Фото для Uzum", "uz": "Uzum uchun surat",
+     "hint_ru": "Чистое фото на белом фоне, 3:4", "hint_uz": "Oq fonda toza surat, 3:4"},
+    {"id": "info", "tier": "main", "icon": "list", "ru": "Инфо-карточка", "uz": "Info-kartochka",
+     "hint_ru": "Фото с размерами, преимуществами, иконками", "hint_uz": "O'lcham, afzallik va ikonkalar bilan surat"},
+    # extra formats
+    {"id": "photo", "tier": "extra", "icon": "camera", "ru": "Сцены и стили", "uz": "Sahna va uslublar",
+     "hint_ru": "Красивая сцена вокруг товара", "hint_uz": "Mahsulot atrofida chiroyli sahna"},
+    {"id": "poster", "tier": "extra", "icon": "layout", "ru": "Плакат", "uz": "Plakat",
+     "hint_ru": "Точный текст, правка без ИИ", "hint_uz": "Aniq matn, AIsiz tahrirlash"},
+    {"id": "promo", "tier": "extra", "icon": "percent", "ru": "Акция", "uz": "Aksiya",
      "hint_ru": "Скидка, новинка, ограниченный тираж", "hint_uz": "Chegirma, yangilik, cheklangan"},
-    {"id": "marketplace", "icon": "shopping", "ru": "Для Uzum", "uz": "Uzum uchun",
-     "hint_ru": "Инфографика с выносками", "hint_uz": "Izohli infografika"},
-    {"id": "story", "icon": "smartphone", "ru": "Сторис", "uz": "Storis",
+    {"id": "story", "tier": "extra", "icon": "smartphone", "ru": "Сторис", "uz": "Storis",
      "hint_ru": "Вертикально, с кнопкой «Заказать»", "hint_uz": "Vertikal, «Buyurtma» tugmasi bilan"},
 ]
 
@@ -63,7 +69,7 @@ LAYOUTS: Dict[str, Dict[str, Any]] = {
     "sale": {"group": "promo", "ru": "Скидка", "uz": "Chegirma", "space": "top", "aspect": "1:1"},
     "new_arrival": {"group": "promo", "ru": "Новинка", "uz": "Yangilik", "space": "bottom", "aspect": "1:1"},
     "limited": {"group": "promo", "ru": "Ограниченный тираж", "uz": "Cheklangan nusxa", "space": "bottom", "aspect": "4:5"},
-    "callouts": {"group": "marketplace", "ru": "Выноски", "uz": "Izohlar", "space": "none", "aspect": "3:4"},
+    "callouts": {"group": "poster", "ru": "Выноски", "uz": "Izohlar", "space": "none", "aspect": "3:4"},
     "story": {"group": "story", "ru": "Сторис", "uz": "Storis", "space": "top", "aspect": "9:16"},
 }
 
@@ -73,6 +79,75 @@ LAYOUTS: Dict[str, Dict[str, Any]] = {
 _SCENE_TAIL = " Keep the product from the reference photo exactly as it is (same shape, colour, pattern and details)."
 
 STYLES: List[Dict[str, Any]] = [
+
+    # ---- Uzum: clean catalogue photos ----------------------------------------
+    {
+        "id": "uzum_clean", "group": "uzum", "kind": "clean", "aspect": "3:4", "icon": "shopping", "layout": None, "featured": True,
+        "preview": "/examples/uzum_clean.jpg",
+        "ru": "Чистое фото", "uz": "Toza surat", "tag_ru": "Белый фон", "tag_uz": "Oq fon",
+        "hint_ru": "Только товар на белом фоне, без лишних предметов, 3:4 (1080×1440)",
+        "hint_uz": "Faqat mahsulot oq fonda, ortiqcha narsalarsiz, 3:4 (1080×1440)",
+        "prompt": "Create a clean marketplace catalog photo of the product from the reference photo. Remove everything else from the scene (other objects, hands, table, clutter). Pure white seamless background (#FFFFFF), the product centered and filling about 80% of the frame, shown fully with nothing cropped, slight elevated front angle, soft even studio lighting, a subtle natural contact shadow under the product. No text, no logos, no watermarks, no props. Sharp focus, photorealistic.",
+    },
+    {
+        "id": "uzum_gradient", "group": "uzum", "kind": "clean", "aspect": "3:4", "icon": "layers", "layout": None, "featured": True,
+        "preview": "/examples/uzum_gradient.jpg",
+        "ru": "Студия, светлый фон", "uz": "Studiya, och fon", "tag_ru": "Серый градиент", "tag_uz": "Kulrang gradient",
+        "hint_ru": "Товар на светло-сером студийном фоне с мягкой тенью",
+        "hint_uz": "Mahsulot och kulrang studiya fonida, yumshoq soya bilan",
+        "prompt": "Create a premium marketplace studio photo of the product from the reference photo. Remove everything else from the scene. Soft light-grey seamless studio background with a gentle vertical gradient, the product centered and filling about 75% of the frame, shown fully, soft diffused studio lighting, a natural soft shadow on the floor. No text, no logos, no watermarks, no props. Sharp focus, photorealistic.",
+    },
+
+    # ---- information cards (the AI draws the text, the server verifies it) ----
+    {
+        "id": "info_white_specs", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "list", "layout": None, "featured": True,
+        "preview": "/examples/info_white_specs.jpg", "slots": INFO_SLOTS["info_white_specs"],
+        "ru": "Белый: размеры и характеристики", "uz": "Oq: o'lcham va tavsiflar", "tag_ru": "Как у брелоков", "tag_uz": "Brelok uslubida",
+        "hint_ru": "Белый фон, заголовок, размерные линии и список характеристик", "hint_uz": "Oq fon, sarlavha, o'lcham chiziqlari va tavsiflar ro'yxati", "prompt": "",
+    },
+    {
+        "id": "info_theme_benefits", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "sparkles", "layout": None, "featured": True,
+        "preview": "/examples/info_theme_benefits.jpg", "slots": INFO_SLOTS["info_theme_benefits"],
+        "ru": "Постер с иконками", "uz": "Ikonkali plakat", "tag_ru": "Яркий, тематический", "tag_uz": "Yorqin, mavzuli",
+        "hint_ru": "Цветной фон под товар, большой заголовок, преимущества с иконками, плашка и ряд значков", "hint_uz": "Mahsulotga mos rangli fon, katta sarlavha, ikonkali afzalliklar, nishon va ikonkalar qatori", "prompt": "",
+    },
+    {
+        "id": "info_headline", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "type", "layout": None, "featured": True,
+        "preview": "/examples/info_headline.jpg", "slots": INFO_SLOTS["info_headline"],
+        "ru": "Крупный заголовок", "uz": "Katta sarlavha", "tag_ru": "Фото + надпись", "tag_uz": "Surat + yozuv",
+        "hint_ru": "Фото товара в жизни и огромный заголовок на нём", "hint_uz": "Hayotiy suratda mahsulot va ustida katta sarlavha", "prompt": "",
+    },
+    {
+        "id": "info_collection", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "gift", "layout": None, "featured": True,
+        "preview": "/examples/info_collection.jpg", "slots": INFO_SLOTS["info_collection"],
+        "ru": "Набор / коллекция", "uz": "To'plam / kolleksiya", "tag_ru": "Для наборов", "tag_uz": "To'plamlar uchun",
+        "hint_ru": "Эффектный фон, крупный заголовок, ряд иконок с подписями внизу", "hint_uz": "Ta'sirchan fon, katta sarlavha, pastda yozuvli ikonkalar qatori", "prompt": "",
+    },
+    {
+        "id": "info_dark_list", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "moon", "layout": None, "featured": True,
+        "preview": "/examples/info_dark_list.jpg", "slots": INFO_SLOTS["info_dark_list"],
+        "ru": "Тёмный постер", "uz": "Qora plakat", "tag_ru": "Список с иконками", "tag_uz": "Ikonkali ro'yxat",
+        "hint_ru": "Тёмный фон, заголовок, список преимуществ с иконками, характеристика и теги", "hint_uz": "Qora fon, sarlavha, ikonkali afzalliklar ro'yxati, tavsif va teglar", "prompt": "",
+    },
+    {
+        "id": "info_dark_pills", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "crown", "layout": None, "featured": True,
+        "preview": "/examples/info_dark_pills.jpg", "slots": INFO_SLOTS["info_dark_pills"],
+        "ru": "Тёмный премиум", "uz": "Qora premium", "tag_ru": "Плашки", "tag_uz": "Plashkalar",
+        "hint_ru": "Тёмный атлас, товар по центру, преимущества в полупрозрачных плашках", "hint_uz": "Qora atlas, mahsulot o'rtada, afzalliklar shaffof plashkalarda", "prompt": "",
+    },
+    {
+        "id": "info_callouts", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "list", "layout": None, "featured": False,
+        "preview": "/examples/info_callouts.jpg", "slots": INFO_SLOTS["info_callouts"],
+        "ru": "Выноски", "uz": "Izohlar", "tag_ru": "Преимущества", "tag_uz": "Afzalliklar",
+        "hint_ru": "Светлый фон, товар в центре, преимущества выносками", "hint_uz": "Och fon, mahsulot o'rtada, afzalliklar izoh sifatida", "prompt": "",
+    },
+    {
+        "id": "info_table", "group": "info", "kind": "ai_text", "aspect": "3:4", "icon": "columns", "layout": None, "featured": False,
+        "preview": "/examples/info_table.jpg", "slots": INFO_SLOTS["info_table"],
+        "ru": "Таблица", "uz": "Jadval", "tag_ru": "Характеристики", "tag_uz": "Tavsiflar",
+        "hint_ru": "Товар сверху, таблица характеристик под ним", "hint_uz": "Mahsulot tepada, ostida tavsiflar jadvali", "prompt": "",
+    },
+
     # ---- photo scenes -----------------------------------------------------
     {
         "id": "minimal_studio", "group": "photo", "icon": "camera", "layout": None,
@@ -219,8 +294,8 @@ STYLES: List[Dict[str, Any]] = [
 
     # ---- marketplace infographic -------------------------------------------
     {
-        "id": "market_callouts", "group": "marketplace", "icon": "list", "layout": "callouts",
-        "ru": "Инфографика", "uz": "Infografika", "tag_ru": "С выносками", "tag_uz": "Izohli",
+        "id": "market_callouts", "group": "poster", "icon": "list", "layout": "callouts",
+        "ru": "Выноски (точный текст)", "uz": "Izohlar (aniq matn)", "tag_ru": "Без ИИ", "tag_uz": "AIsiz",
         "hint_ru": "Товар по центру, преимущества выносками слева и справа",
         "hint_uz": "Mahsulot o'rtada, afzalliklar chap va o'ngda izoh sifatida",
         "prompt": "Clean e-commerce infographic background: the product centered and large on a soft light neutral gradient background with plenty of calm space on both the left and right sides, soft natural shadow, high sharpness.",
@@ -249,12 +324,23 @@ def needs_overlay(style_id: Optional[str]) -> bool:
     return bool(get_style(style_id).get("layout"))
 
 
+def style_kind(style_id: Optional[str]) -> str:
+    """"clean" (Uzum catalogue photo), "ai_text" (AI-drawn information card), "poster" (server-drawn) or "scene"."""
+    style = get_style(style_id)
+    if style.get("kind"):
+        return style["kind"]
+    return "poster" if style.get("layout") else "scene"
+
+
 def layout_for(style_id: Optional[str]) -> Optional[str]:
     return get_style(style_id).get("layout")
 
 
 def default_aspect(style_id: Optional[str]) -> str:
-    layout = layout_for(style_id)
+    style = get_style(style_id)
+    if style.get("aspect"):
+        return style["aspect"]
+    layout = style.get("layout")
     return LAYOUTS[layout]["aspect"] if layout else DEFAULT_ASPECT
 
 
@@ -275,7 +361,7 @@ def public_registry() -> Dict[str, Any]:
     for s in STYLES:
         item = {k: v for k, v in s.items() if k != "prompt"}
         layout = s.get("layout")
-        item["aspect"] = LAYOUTS[layout]["aspect"] if layout else DEFAULT_ASPECT
+        item["aspect"] = s.get("aspect") or (LAYOUTS[layout]["aspect"] if layout else DEFAULT_ASPECT)
         styles.append(item)
     layouts = {k: {kk: vv for kk, vv in v.items() if kk != "space"} for k, v in LAYOUTS.items()}
     palettes = {k: {kk: vv for kk, vv in v.items() if kk in ("ru", "uz", "swatch")} for k, v in PALETTES.items()}

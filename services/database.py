@@ -133,6 +133,7 @@ def init_db(force: bool = False) -> None:
                 ("users", "brand_name", "TEXT"), ("users", "brand_color", "TEXT"),
                 ("users", "brand_contact", "TEXT"), ("users", "brand_logo", "TEXT"),
                 ("generated_cards", "source_photo_url", "TEXT"), ("generated_cards", "poster_config", "TEXT"),
+                ("generated_cards", "info_config", "TEXT"),
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
@@ -439,12 +440,14 @@ def save_generated_card(
     is_demo: bool = False,
     source_photo_url: Optional[str] = None,
     poster_config: Optional[Dict[str, Any]] = None,
+    info_config: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Save a generated product card to the database for history with optional user_id."""
     try:
         hashtags_json = json.dumps(hashtags, ensure_ascii=False) if isinstance(hashtags, list) else (hashtags or "[]")
         studio_photo_url = store_photo(studio_photo_url)
         poster_json = json.dumps(poster_config, ensure_ascii=False) if poster_config else None
+        info_json = json.dumps(info_config, ensure_ascii=False) if info_config else None
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -452,13 +455,13 @@ def save_generated_card(
                 INSERT INTO generated_cards (
                     title, description, price_tag, hashtags, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id, is_demo, source_photo_url, poster_config
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_price, desired_price, note, lang, user_id, is_demo, source_photo_url, poster_config, info_config
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     title, description, price_tag, hashtags_json, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id, 1 if is_demo else 0, source_photo_url, poster_json
+                    cost_price, desired_price, note, lang, user_id, 1 if is_demo else 0, source_photo_url, poster_json, info_json
                 ),
             )
             conn.commit()
@@ -466,6 +469,13 @@ def save_generated_card(
     except Exception as exc:
         logger.error("Failed to save generated card: %s", exc)
         return 0
+
+
+def _loads(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
 
 
 def _poster_fields(card_id: int, raw_config: Optional[str]) -> Dict[str, Any]:
@@ -495,7 +505,7 @@ def get_history(
                 SELECT id, created_at, title, description, price_tag, hashtags,
                        marketing_tip, studio_photo_url, photoshoot_style,
                        content_tone, content_format, cost_price, desired_price,
-                       note, lang, is_favorite, user_id, poster_config
+                       note, lang, is_favorite, user_id, poster_config, info_config
                 FROM generated_cards
                 WHERE 1=1
             """
@@ -541,6 +551,7 @@ def get_history(
                     "user_id": row["user_id"],
                     **_poster_fields(row["id"], row["poster_config"]),
                     "poster_has_scene": bool(row["studio_photo_url"]),
+                    "info_config": _loads(row["info_config"]),
                 })
             return items
     except Exception as exc:
@@ -693,7 +704,8 @@ def clear_history(user_id: int) -> bool:
 
 def get_card_for_poster(card_id: int, user_id: Optional[int]) -> Optional[Dict[str, Any]]:
     """Photo references and saved poster config of a card (user_id=None: any card, administrators only)."""
-    query = "SELECT id, user_id, title, studio_photo_url, source_photo_url, poster_config, lang FROM generated_cards WHERE id = ?"
+    query = ("SELECT id, user_id, title, studio_photo_url, source_photo_url, poster_config, info_config, photoshoot_style, "
+             "desired_price, lang FROM generated_cards WHERE id = ?")
     params: List[Any] = [card_id]
     if user_id is not None:
         query += " AND user_id = ?"
@@ -719,6 +731,31 @@ def set_card_poster_config(card_id: int, user_id: int, config: Dict[str, Any]) -
     except Exception as exc:
         logger.error("Failed to save poster config: %s", exc)
         return False
+
+
+def update_card_info(card_id: int, user_id: int, studio_photo_url: Optional[str], info_config: Dict[str, Any],
+                     poster_config: Optional[Dict[str, Any]] = None, style: Optional[str] = None) -> Optional[str]:
+    """Replace a card's picture and info settings after a re-generation. Returns the previous picture reference
+    (so the caller can delete the old file), or None if the card is not the user's."""
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT studio_photo_url FROM generated_cards WHERE id = ? AND user_id = ?", (card_id, user_id)
+            ).fetchone()
+            if not row:
+                return None
+            new_ref = store_photo(studio_photo_url) if studio_photo_url else row["studio_photo_url"]
+            conn.execute(
+                "UPDATE generated_cards SET studio_photo_url = ?, info_config = ?, poster_config = COALESCE(?, poster_config), "
+                "photoshoot_style = COALESCE(?, photoshoot_style) WHERE id = ? AND user_id = ?",
+                (new_ref, json.dumps(info_config, ensure_ascii=False),
+                 json.dumps(poster_config, ensure_ascii=False) if poster_config else None, style, card_id, user_id),
+            )
+            conn.commit()
+            return row["studio_photo_url"] if new_ref != row["studio_photo_url"] else ""
+    except Exception as exc:
+        logger.error("Failed to update card info: %s", exc)
+        return None
 
 
 def get_brand(user_id: int) -> Dict[str, Any]:

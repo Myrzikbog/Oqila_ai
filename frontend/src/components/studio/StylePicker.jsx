@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Camera, LayoutTemplate, Percent, ShoppingBag, Smartphone, Sparkles, Crown, Sun, Layers, Hand, Gift,
   Flower2, Heart, Utensils, User, LayoutGrid, SlidersHorizontal, Columns2, Minus, Star, Clock, ListChecks,
+  Type, Moon, ChevronDown,
 } from 'lucide-react';
 import { hapticImpact } from '../../utils/telegram';
 import { L } from './labels';
@@ -10,7 +11,7 @@ const ICONS = {
   camera: Camera, layout: LayoutTemplate, percent: Percent, shopping: ShoppingBag, smartphone: Smartphone,
   sparkles: Sparkles, crown: Crown, sun: Sun, layers: Layers, hand: Hand, gift: Gift, flower: Flower2,
   heart: Heart, utensils: Utensils, user: User, grid: LayoutGrid, sliders: SlidersHorizontal,
-  columns: Columns2, minus: Minus, star: Star, clock: Clock, list: ListChecks,
+  columns: Columns2, minus: Minus, star: Star, clock: Clock, list: ListChecks, type: Type, moon: Moon,
 };
 const iconFor = (name) => ICONS[name] || Sparkles;
 
@@ -40,41 +41,82 @@ export function LayoutGlyph({ layout, className = '' }) {
   );
 }
 
-/** Output type cards: what does the seller want to get? */
+/** Output types: Uzum photo and information card are the main ones, the rest sits under "more formats". */
 export function OutputTypePicker({ groups, value, onChange, lang }) {
   const l = L[lang] || L.ru;
+  const main = groups.filter((g) => g.tier !== 'extra');
+  const extra = groups.filter((g) => g.tier === 'extra');
+  const [open, setOpen] = useState(false);
+  const extraSelected = extra.some((g) => g.id === value);
+  const showExtra = open || extraSelected;
+
+  const card = (group, big) => {
+    const Icon = iconFor(group.icon);
+    const selected = value === group.id;
+    return (
+      <button
+        key={group.id}
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        onClick={() => { hapticImpact('light'); onChange(group.id); }}
+        className={`text-left ${big ? 'p-3.5' : 'p-3'} rounded-2xl border transition-all active:scale-[0.98] ${
+          selected
+            ? 'bg-brand-50 dark:bg-teal-950/50 border-brand-500 dark:border-teal-500 ring-1 ring-brand-500/30'
+            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <Icon className={`w-4 h-4 flex-shrink-0 ${selected ? 'text-brand-600 dark:text-teal-300' : 'text-slate-400'}`} />
+          <span className={`${big ? 'text-sm' : 'text-xs'} font-bold text-slate-900 dark:text-white`}>{group[lang] || group.ru}</span>
+        </div>
+        <div className="mt-1 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+          {group[`hint_${lang}`] || group.hint_ru}
+        </div>
+      </button>
+    );
+  };
+
   return (
     <div className="space-y-2">
       <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">{l.what_title}</div>
       <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={l.what_title}>
-        {groups.map((group, index) => {
-          const Icon = iconFor(group.icon);
-          const selected = value === group.id;
-          return (
-            <button
-              key={group.id}
-              type="button"
-              role="radio"
-              aria-checked={selected}
-              onClick={() => { hapticImpact('light'); onChange(group.id); }}
-              className={`${index === 0 && groups.length % 2 === 1 ? 'col-span-2' : ''} text-left p-3 rounded-2xl border transition-all active:scale-[0.98] ${
-                selected
-                  ? 'bg-brand-50 dark:bg-teal-950/50 border-brand-500 dark:border-teal-500 ring-1 ring-brand-500/30'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Icon className={`w-4 h-4 flex-shrink-0 ${selected ? 'text-brand-600 dark:text-teal-300' : 'text-slate-400'}`} />
-                <span className="text-xs font-bold text-slate-900 dark:text-white">{group[lang] || group.ru}</span>
-              </div>
-              <div className="mt-1 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-                {group[`hint_${lang}`] || group.hint_ru}
-              </div>
-            </button>
-          );
-        })}
+        {main.map((g) => card(g, true))}
       </div>
+      {extra.length > 0 && (
+        <>
+          <button
+            type="button"
+            aria-expanded={showExtra}
+            onClick={() => setOpen((v) => !v)}
+            className="w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold text-brand-700 dark:text-teal-300 py-1"
+          >
+            {showExtra ? l.fewer_formats : l.more_formats}
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showExtra ? 'rotate-180' : ''}`} />
+          </button>
+          {showExtra && (
+            <div className="grid grid-cols-2 gap-2" role="radiogroup">
+              {extra.map((g) => card(g, false))}
+            </div>
+          )}
+        </>
+      )}
     </div>
+  );
+}
+
+/** Real example of a template (3:4); hidden if the file is missing so the tile still works. */
+function StylePreview({ src }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="w-full aspect-[3/4] object-cover rounded-lg mb-1.5 border border-slate-200/70 dark:border-slate-700"
+    />
   );
 }
 
@@ -87,7 +129,7 @@ export function StylePicker({ styles, value, onChange, lang, showMore = true }) 
   const visible = hasMore && !expanded
     ? [...featured, ...styles.filter((s) => !s.featured && s.id === value)]
     : styles;
-  const withGlyph = styles.some((s) => s.layout);
+  const withGlyph = styles.some((s) => s.layout || s.preview);
 
   return (
     <div className="space-y-2">
@@ -108,11 +150,13 @@ export function StylePicker({ styles, value, onChange, lang, showMore = true }) 
                   : 'bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
               }`}
             >
-              {style.layout ? (
+              {style.preview ? (
+                <StylePreview src={style.preview} />
+              ) : style.layout ? (
                 <LayoutGlyph layout={style.layout} className="w-full h-16 mb-1.5" />
               ) : null}
               <div className="flex items-center gap-1.5">
-                {!style.layout && <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${selected ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'}`} />}
+                {!style.layout && !style.preview && <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${selected ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'}`} />}
                 <span className="truncate font-bold text-[11px]">{style[lang] || style.ru}</span>
               </div>
               {(style[`tag_${lang}`] || style.tag_ru) && (
