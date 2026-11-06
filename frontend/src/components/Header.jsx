@@ -33,7 +33,7 @@ export default function Header({
                 {t.app_title}
               </h1>
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium tracking-tight mt-0.5">
+            <p className="hidden min-[360px]:block whitespace-nowrap text-[11px] text-slate-500 dark:text-slate-400 font-medium tracking-tight mt-0.5">
               {t.app_subtitle}
             </p>
           </div>

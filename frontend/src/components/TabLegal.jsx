@@ -461,56 +461,16 @@ const FAQ_UZ = [
   },
 ];
 
-const COLOR_MAP = {
-  violet: {
-    bg: 'bg-violet-100 dark:bg-violet-950',
-    text: 'text-violet-700 dark:text-violet-300',
-    badge: 'bg-violet-50 dark:bg-violet-950 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800',
-    border: 'border-violet-300 dark:border-violet-700',
-  },
-  amber: {
-    bg: 'bg-amber-100 dark:bg-amber-950',
-    text: 'text-amber-700 dark:text-amber-300',
-    badge: 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-    border: 'border-amber-300 dark:border-amber-700',
-  },
-  emerald: {
-    bg: 'bg-emerald-100 dark:bg-emerald-950',
-    text: 'text-emerald-700 dark:text-emerald-300',
-    badge: 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
-    border: 'border-emerald-300 dark:border-emerald-700',
-  },
-  rose: {
-    bg: 'bg-rose-100 dark:bg-rose-950',
-    text: 'text-rose-700 dark:text-rose-300',
-    badge: 'bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
-    border: 'border-rose-300 dark:border-rose-700',
-  },
-  teal: {
-    bg: 'bg-teal-100 dark:bg-teal-950',
-    text: 'text-teal-700 dark:text-teal-300',
-    badge: 'bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
-    border: 'border-teal-300 dark:border-teal-700',
-  },
-  purple: {
-    bg: 'bg-purple-100 dark:bg-purple-950',
-    text: 'text-purple-700 dark:text-purple-300',
-    badge: 'bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
-    border: 'border-purple-300 dark:border-purple-700',
-  },
-  indigo: {
-    bg: 'bg-indigo-100 dark:bg-indigo-950',
-    text: 'text-indigo-700 dark:text-indigo-300',
-    badge: 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
-    border: 'border-indigo-300 dark:border-indigo-700',
-  },
-  sky: {
-    bg: 'bg-sky-100 dark:bg-sky-950',
-    text: 'text-sky-700 dark:text-sky-300',
-    badge: 'bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800',
-    border: 'border-sky-300 dark:border-sky-700',
-  },
+const BRAND_COLORS = {
+  bg: 'bg-brand-50 dark:bg-teal-950',
+  text: 'text-brand-700 dark:text-teal-300',
+  badge: 'bg-brand-50 dark:bg-teal-950 text-brand-700 dark:text-teal-300 border-brand-200 dark:border-teal-800',
+  border: 'border-brand-200 dark:border-teal-800',
 };
+
+// One brand colour for every topic: the icons identify the topic, so a rainbow adds nothing.
+// (item.color is kept in the data but intentionally ignored.)
+const COLOR_MAP = new Proxy({}, { get: () => BRAND_COLORS });
 
 // ---------------------------------------------------------------------------
 // Main Component
@@ -597,8 +557,8 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
   return (
     <div className="space-y-4">
       {/* Header Banner */}
-      <div className="glass-card rounded-2xl p-4 border-l-4 border-l-rose-600 dark:border-l-rose-400 bg-gradient-to-r from-rose-50/50 via-white to-white dark:from-rose-950/30 dark:via-slate-900 dark:to-slate-900">
-        <div className="flex items-center space-x-2 text-rose-800 dark:text-rose-300">
+      <div className="glass-card rounded-2xl p-4 border-l-4 border-l-brand-600 dark:border-l-brand-400 bg-gradient-to-r from-teal-50/70 via-white to-white dark:from-teal-950/30 dark:via-slate-900 dark:to-slate-900">
+        <div className="flex items-center space-x-2 text-brand-800 dark:text-teal-300">
           <Scale className="w-5 h-5 flex-shrink-0" />
           <h2 className="font-bold text-sm tracking-tight">{t.legal_title}</h2>
         </div>

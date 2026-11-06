@@ -1,4 +1,5 @@
 import React from 'react';
+import Collapsible from './Collapsible';
 import { 
   Sparkles, 
   Camera, 
@@ -41,7 +42,7 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
           </div>
         </div>
 
-        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-normal">
+        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-normal line-clamp-3">
           {t.mission_text}
         </p>
 
@@ -62,8 +63,8 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
             {lang === 'uz' ? "Telegram Mini App" : "Работает в Telegram"}
           </span>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800">
-            {lang === 'uz' ? "O'zbekiston qonunchiligi" : "Законы РУз (ПП-4742)"}
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+            {lang === 'uz' ? "O'zbekiston qonunchiligi" : "Законы Узбекистана"}
           </span>
         </div>
       </div>
@@ -90,8 +91,8 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
 
         {/* Feature 2: Finance */}
         <div className="glass-card rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-2 transition-colors">
-          <div className="flex items-center space-x-2 text-amber-800 dark:text-amber-300 font-bold text-xs">
-            <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center flex-shrink-0">
+          <div className="flex items-center space-x-2 text-brand-800 dark:text-teal-300 font-bold text-xs">
+            <div className="w-7 h-7 rounded-lg bg-teal-50 dark:bg-teal-950 text-brand-600 dark:text-teal-400 flex items-center justify-center flex-shrink-0">
               <Calculator className="w-4 h-4" />
             </div>
             <span>{t.feat_finance_title}</span>
@@ -103,8 +104,8 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
 
         {/* Feature 3: Legal */}
         <div className="glass-card rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-2 transition-colors">
-          <div className="flex items-center space-x-2 text-sky-800 dark:text-sky-300 font-bold text-xs">
-            <div className="w-7 h-7 rounded-lg bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center flex-shrink-0">
+          <div className="flex items-center space-x-2 text-brand-800 dark:text-teal-300 font-bold text-xs">
+            <div className="w-7 h-7 rounded-lg bg-teal-50 dark:bg-teal-950 text-brand-600 dark:text-teal-400 flex items-center justify-center flex-shrink-0">
               <Scale className="w-4 h-4" />
             </div>
             <span>{t.feat_legal_title}</span>
@@ -116,21 +117,16 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
       </div>
 
       {/* Target Audience */}
-      <div className="glass-card rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-2.5 transition-colors">
-        <div className="flex items-center space-x-2 text-slate-900 dark:text-white font-bold text-xs">
-          <Users className="w-4 h-4 text-brand-600 dark:text-teal-400" />
-          <span>{t.about_audience_title}</span>
-        </div>
-
+      <Collapsible icon={Users} title={t.about_audience_title}>
         <div className="space-y-2">
           {audienceList.map((item, idx) => (
             <div key={idx} className="flex items-start space-x-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mt-0.5 flex-shrink-0" />
+              <CheckCircle2 className="w-3.5 h-3.5 text-brand-500 mt-0.5 flex-shrink-0" />
               <span>{item}</span>
             </div>
           ))}
         </div>
-      </div>
+      </Collapsible>
 
       {/* About Creators */}
       <div className="glass-card rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 space-y-2.5 transition-colors">
@@ -154,22 +150,16 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
         </div>
       </div>
 
-      {/* Legal Disclaimer & Limitation of Liability Card */}
-      <div className="glass-card rounded-2xl p-4 border border-amber-200/70 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-2.5 transition-colors">
-        <div className="flex items-center space-x-2 text-amber-900 dark:text-amber-300 font-bold text-xs">
-          <ShieldAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-          <span>{t.about_disclaimer_title}</span>
-        </div>
-
+      {/* Legal disclaimer (collapsed, always one tap away) */}
+      <Collapsible icon={ShieldAlert} title={t.about_disclaimer_title}>
         <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
           {t.about_disclaimer_text}
         </p>
-
-        <div className="pt-2 border-t border-amber-200/60 dark:border-amber-900/40 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+        <div className="pt-2 border-t border-slate-200/70 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
           <span className="font-semibold">{t.about_version_label}:</span>
           <span className="font-bold text-slate-800 dark:text-slate-200">{t.about_version_val}</span>
         </div>
-      </div>
+      </Collapsible>
 
       {/* Clean Footer */}
       <div className="text-center py-2 space-y-1">

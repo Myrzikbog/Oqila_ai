@@ -483,7 +483,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
       {/* ------------------------------------------------------------- */}
       {/* Uzum Brand Banner & Status Header                             */}
       {/* ------------------------------------------------------------- */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-purple-700 via-indigo-700 to-purple-900 text-white p-4 shadow-float border border-purple-500/20">
+      <div className="relative overflow-hidden rounded-2xl bg-purple-700 dark:bg-purple-900 text-white p-4 shadow-soft">
         <div className="absolute -right-6 -bottom-6 opacity-10 pointer-events-none">
           <ShoppingBag className="w-36 h-36" />
         </div>
@@ -656,7 +656,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
-          <span>{isUz ? "FBS & Marja" : "FBS & Маржа"}</span>
+          <span>{isUz ? "Marja" : "Маржа"}</span>
           {lowStockCount > 0 && (
             <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center">
               !
@@ -675,7 +675,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
-          <span>{isUz ? "FBO Prognoz" : "FBO Прогноз"}</span>
+          <span>FBO</span>
           {criticalFboCount > 0 && (
             <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-black animate-pulse">
               {criticalFboCount}
@@ -904,7 +904,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
       {subTab === 'stocks' && (
         <div className="space-y-3">
           {/* Feature 3: Margin & Fee Guard Summary Banner */}
-          <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-indigo-950/40 border border-emerald-300 dark:border-emerald-800 rounded-2xl shadow-sm space-y-2.5">
+          <div className="p-3.5 bg-brand-50/70 dark:bg-teal-950/30 border border-brand-200 dark:border-teal-900 rounded-2xl space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
@@ -1219,7 +1219,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
       {subTab === 'fbo' && (
         <div className="space-y-3">
           {/* FBO Educational & Context Header */}
-          <div className="p-3.5 bg-gradient-to-r from-purple-700 via-indigo-700 to-purple-900 rounded-2xl text-white shadow-card space-y-2">
+          <div className="p-3.5 bg-purple-700 dark:bg-purple-900 rounded-2xl text-white shadow-soft space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
@@ -1411,7 +1411,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
             </div>
 
             {/* Net Payout Hero Card */}
-            <div className="p-4 rounded-xl bg-gradient-to-br from-purple-500/10 via-indigo-500/10 to-purple-500/20 border border-purple-500/20 text-center">
+            <div className="p-4 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900 text-center">
               <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block uppercase tracking-wide">
                 {t.uzum_net_payout}
               </span>
@@ -1507,7 +1507,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
               <button
                 onClick={() => handleConnectApi(true)}
                 disabled={isLoading}
-                className="py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-xs font-bold shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-1.5"
+                className="py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm active:scale-95 transition-all flex items-center justify-center space-x-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{t.uzum_demo_launch_btn}</span>

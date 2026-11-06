@@ -372,6 +372,16 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
           {t.studio_subtitle}
         </p>
+        {!result && !isLoading && (
+          <button
+            type="button"
+            onClick={handleQuickDemo}
+            className="mt-3 w-full py-2.5 px-4 rounded-xl bg-brand-700 hover:bg-brand-800 text-white font-bold text-xs flex items-center justify-center space-x-2 shadow-soft transition-all active:scale-[0.98]"
+          >
+            <Zap className="w-4 h-4 text-teal-200" />
+            <span>{t.btn_try_example}</span>
+          </button>
+        )}
       </div>
 
       {/* Error Alert Banner */}
@@ -775,15 +785,6 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               </span>
             </button>
 
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={handleQuickDemo}
-              className="w-full py-2 px-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100/80 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-300 font-semibold text-xs flex items-center justify-center space-x-2 transition-all active:scale-[0.98]"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-              <span>{t.btn_demo}</span>
-            </button>
           </div>
         </div>
       )}

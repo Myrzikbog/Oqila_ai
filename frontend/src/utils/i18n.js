@@ -1,12 +1,12 @@
 export const translations = {
   ru: {
     app_title: "Oqila AI",
-    app_subtitle: "Бизнес-ассистент для предпринимательниц",
+    app_subtitle: "Бизнес-помощник",
     nav_studio: "Студия",
     nav_finance: "Финансы",
     nav_uzum: "Uzum",
     nav_legal: "Право",
-    nav_about: "О платформе",
+    nav_about: "О нас",
     
     // Tab 1: Studio
     studio_title: "AI Упаковка товара",
@@ -23,6 +23,7 @@ export const translations = {
     product_note_placeholder: "Например: натуральный шёлк, хан-атлас, ручная вышивка золотом",
     currency: "сум",
     btn_demo: "Быстрое демо",
+    btn_try_example: "Попробовать на примере",
     btn_generate: "Сгенерировать упаковку",
     generating_title: "AI анализирует изделие...",
     generating_subtitle: "Распознавание фактуры, расчёт ценообразования и генерация контента",
@@ -181,6 +182,12 @@ export const translations = {
     price_slider_title: "Сценарий: Что если изменить цену?",
     distribution_title: "Куда уходит каждый сум с продажи (структура)",
     channel_compare_title: "Сравнение каналов продаж",
+    what_it_means: "Что это значит",
+    best_channel_label: "Выгоднее всего",
+    channel_direct_short: "Прямые продажи",
+    channel_details_title: "Детали по каналам",
+    channel_details_summary: "Uzum, Telegram и точка безубыточности",
+    legal_reference_summary: "Налоги, сроки и пороги для вашего случая",
     channel_direct_title: "Прямые продажи / Шоурум",
     best_channel_badge: "⭐️ Самый выгодный",
     
@@ -242,7 +249,7 @@ export const translations = {
     // Uzum Market Tab
     uzum_title: "Интеграция с Uzum Market",
     uzum_subtitle: "Управление заказами FBS/DBS, складскими остатками и Telegram-пуши",
-    uzum_api_capabilities_btn: "ℹ️ Возможности Uzum API",
+    uzum_api_capabilities_btn: "Возможности Uzum API",
     uzum_api_capabilities_title: "Возможности Uzum Market OpenAPI",
     uzum_api_modal_close: "Понятно",
     uzum_connected_badge: "Подключено",
@@ -254,7 +261,7 @@ export const translations = {
     uzum_tab_orders: "Заказы",
     uzum_tab_stocks: "Склад и Цены",
     uzum_tab_finance: "Финансы",
-    uzum_tab_settings: "Настройки API",
+    uzum_tab_settings: "API",
     
     // Orders
     uzum_orders_new: "Новые (Ждут подтверждения)",
@@ -314,12 +321,12 @@ export const translations = {
   },
   uz: {
     app_title: "Oqila AI",
-    app_subtitle: "Ayol tadbirkorlar uchun raqamli assistent",
+    app_subtitle: "Biznes yordamchisi",
     nav_studio: "Studiya",
     nav_finance: "Moliya",
     nav_uzum: "Uzum",
     nav_legal: "Huquq",
-    nav_about: "Dastur haqida",
+    nav_about: "Biz haqimizda",
     
     // Tab 1: Studio
     studio_title: "Mahsulotni AI bilan qadoqlash",
@@ -336,6 +343,7 @@ export const translations = {
     product_note_placeholder: "Masalan: xon-atlas, tabiiy ipak, qo'lda tikilgan naqshlar",
     currency: "so'm",
     btn_demo: "Tezkor demo",
+    btn_try_example: "Namuna bilan sinab ko'rish",
     btn_generate: "Qadoqlashni yaratish",
     generating_title: "AI mahsulotni tahlil qilmoqda...",
     generating_subtitle: "Mato fakturasi, narx modeli va marketing matni tayyorlanmoqda",
@@ -494,6 +502,12 @@ export const translations = {
     price_slider_title: "Ssenariy: Narx o'zgarsa nima bo'ladi?",
     distribution_title: "Tushum tarkibi (har bir so'm qayerga ketadi)",
     channel_compare_title: "Savdo kanallarini taqqoslash",
+    what_it_means: "Bu nimani anglatadi",
+    best_channel_label: "Eng foydali",
+    channel_direct_short: "To'g'ridan-to'g'ri",
+    channel_details_title: "Kanallar bo'yicha tafsilotlar",
+    channel_details_summary: "Uzum, Telegram va zararsizlik nuqtasi",
+    legal_reference_summary: "Siz uchun soliqlar, muddatlar va chegaralar",
     channel_direct_title: "To'g'ridan-to'g'ri / Do'kondan",
     best_channel_badge: "⭐️ Eng foydali kanal",
     
@@ -555,7 +569,7 @@ export const translations = {
     // Uzum Market Tab
     uzum_title: "Uzum Market Integratsiyasi",
     uzum_subtitle: "FBS/DBS buyurtmalarni boshqarish, ombor qoldiqlari va Telegram xabarlari",
-    uzum_api_capabilities_btn: "ℹ️ Uzum API Imkoniyatlari",
+    uzum_api_capabilities_btn: "Uzum API Imkoniyatlari",
     uzum_api_capabilities_title: "Uzum Market OpenAPI Imkoniyatlari",
     uzum_api_modal_close: "Tushundim",
     uzum_connected_badge: "Ulangan",
@@ -567,7 +581,7 @@ export const translations = {
     uzum_tab_orders: "Buyurtmalar",
     uzum_tab_stocks: "Qoldiq va Narxlar",
     uzum_tab_finance: "Moliya",
-    uzum_tab_settings: "API Sozlamalari",
+    uzum_tab_settings: "API",
     
     // Orders
     uzum_orders_new: "Yangi (Tasdiqlash kutilmoqda)",

@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   Calculator, 
   TrendingUp, 
-  Percent, 
+
   Building2, 
-  UserCheck, 
+
   ShoppingBag, 
   ShieldCheck, 
   CheckCircle2,
@@ -13,7 +13,7 @@ import {
   Target, 
   Send, 
   Info, 
-  Layers, 
+
   AlertTriangle,
   Receipt,
   Coins,
@@ -26,6 +26,7 @@ import {
   Star
 } from 'lucide-react';
 import { hapticImpact } from '../utils/telegram';
+import Collapsible, { Disclosure } from './Collapsible';
 
 export default function TabFinance({ lang, t, profile, onOpenProfile }) {
   const [salePrice, setSalePrice] = useState('380000');
@@ -153,6 +154,14 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
       setTimeout(() => setCopied(false), 2500);
     }
   };
+
+  const compareSummary = (() => {
+    if (!calcData) return '';
+    const directNet = Math.max(0, calcData.sale_price - calcData.cost_price - calcData.tax_payable_item);
+    const best = Math.max(directNet, calcData.telegram_net, calcData.uzum_net);
+    const name = best === calcData.uzum_net ? 'Uzum' : best === calcData.telegram_net ? 'Telegram' : (t.channel_direct_short || 'Direct');
+    return `${t.best_channel_label || 'Выгоднее всего'}: ${name} · ${formatMoney(best)} ${t.currency}`;
+  })();
 
   const categories = [
     { id: 'electronics', label: lang === 'uz' ? "Elektronika va aksessuarlar (Xitoy) (8%)" : "Электроника и аксессуары (Китай) (8%)" },
@@ -423,63 +432,25 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
           </select>
         </div>
 
-        {/* Channel Navigation Pills */}
-        <div className="pt-1">
-          <div className="grid grid-cols-4 gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/60 dark:border-slate-700/60 text-center">
-            <button
-              type="button"
-              onClick={() => { hapticImpact('light'); setChannelTab('all'); }}
-              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                channelTab === 'all'
-                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
-              }`}
-            >
-              {t.channel_tab_all}
-            </button>
-            <button
-              type="button"
-              onClick={() => { hapticImpact('light'); setChannelTab('uzum'); }}
-              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                channelTab === 'uzum'
-                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
-              }`}
-            >
-              {t.channel_tab_uzum}
-            </button>
-            <button
-              type="button"
-              onClick={() => { hapticImpact('light'); setChannelTab('telegram'); }}
-              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                channelTab === 'telegram'
-                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
-              }`}
-            >
-              {t.channel_tab_telegram}
-            </button>
-            <button
-              type="button"
-              onClick={() => { hapticImpact('light'); setChannelTab('breakeven'); }}
-              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
-                channelTab === 'breakeven'
-                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
-              }`}
-            >
-              {t.channel_tab_breakeven}
-            </button>
-          </div>
-        </div>
       </div>
 
-      {/* CRITICAL: High-Level Metrics including TAX PAYABLE */}
+      {/* Result: the four numbers that matter */}
       {calcData && (
         <div className="grid grid-cols-2 gap-2.5">
-          {/* Card 1: Валовая прибыль */}
-          <div className="glass-card rounded-2xl p-3 border border-emerald-200/80 dark:border-emerald-800/40 bg-gradient-to-br from-emerald-50/50 to-white dark:from-emerald-950/20 dark:to-slate-900">
-            <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400">
+          <div className="col-span-2 rounded-2xl p-4 bg-brand-700 dark:bg-teal-900/60 text-white shadow-soft">
+            <div className="flex items-center justify-between text-teal-100">
+              <span className="text-[11px] font-bold tracking-tight">{t.kpi_net_profit} (Uzum)</span>
+              <Coins className="w-4 h-4" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold leading-none">{formatMoney(calcData.uzum_net)}</span>
+              <span className="text-xs font-semibold text-teal-100">{t.currency}</span>
+              <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full bg-white/15">{calcData.margin_pct}%</span>
+            </div>
+          </div>
+
+          <div className="glass-card rounded-2xl p-3 border border-slate-200/80 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
               <span className="text-[11px] font-bold tracking-tight">{t.metric_gross}</span>
               <TrendingUp className="w-4 h-4" />
             </div>
@@ -488,39 +459,13 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             </div>
           </div>
 
-          {/* Card 2: НАЛОГ К УПЛАТЕ (ЧЕТКО И ВИДИМО) */}
-          <div className="glass-card rounded-2xl p-3 border border-red-200 dark:border-red-900/40 bg-gradient-to-br from-red-50/50 to-white dark:from-red-950/20 dark:to-slate-900">
-            <div className="flex items-center justify-between text-red-600 dark:text-red-400">
-              <span className="text-[11px] font-bold tracking-tight">{t.kpi_tax_payable}</span>
+          <div className="glass-card rounded-2xl p-3 border border-slate-200/80 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+              <span className="text-[11px] font-bold tracking-tight">{t.kpi_tax_payable} · {calcData.tax_rate_effective_pct}%</span>
               <Receipt className="w-4 h-4" />
             </div>
-            <div className="text-base font-extrabold text-red-600 dark:text-red-400 mt-1">
+            <div className="text-base font-extrabold text-rose-600 dark:text-rose-400 mt-1">
               {formatMoney(calcData.tax_payable_item)} <span className="text-[10px] font-semibold">{t.currency}</span>
-              <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300 font-bold">
-                {calcData.tax_rate_effective_pct}%
-              </span>
-            </div>
-          </div>
-
-          {/* Card 3: Чистая прибыль на Uzum */}
-          <div className="glass-card rounded-2xl p-3 border border-brand-200/80 dark:border-teal-800/40 bg-gradient-to-br from-teal-50/50 to-white dark:from-teal-950/20 dark:to-slate-900">
-            <div className="flex items-center justify-between text-brand-700 dark:text-teal-400">
-              <span className="text-[11px] font-bold tracking-tight">{t.kpi_net_profit} (Uzum)</span>
-              <Coins className="w-4 h-4" />
-            </div>
-            <div className="text-base font-extrabold text-brand-900 dark:text-teal-200 mt-1">
-              {formatMoney(calcData.uzum_net)} <span className="text-[10px] font-semibold text-slate-500">{t.currency}</span>
-            </div>
-          </div>
-
-          {/* Card 4: Маржинальность */}
-          <div className="glass-card rounded-2xl p-3 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-            <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
-              <span className="text-[11px] font-bold tracking-tight">{t.metric_margin}</span>
-              <Percent className="w-4 h-4 text-brand-600 dark:text-teal-400" />
-            </div>
-            <div className="text-base font-extrabold text-slate-900 dark:text-white mt-1">
-              {calcData.margin_pct}%
             </div>
           </div>
         </div>
@@ -540,43 +485,36 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
           {/* Segmented bar */}
           <div className="h-3 w-full rounded-full overflow-hidden flex bg-slate-100 dark:bg-slate-800 shadow-inner">
             <div style={{ width: `${Math.min(100, Math.max(0, calcData.cost_share_pct))}%` }} className="bg-slate-400 dark:bg-slate-500 h-full" title="Tannarx" />
-            <div style={{ width: `${Math.min(100, Math.max(0, calcData.tax_share_pct))}%` }} className="bg-rose-500 h-full" title="Soliq" />
-            <div style={{ width: `${Math.min(100, Math.max(0, calcData.uzum_share_pct))}%` }} className="bg-purple-500 h-full" title="Uzum" />
-            <div style={{ width: `${Math.min(100, Math.max(0, calcData.net_share_pct))}%` }} className="bg-emerald-500 h-full" title="Sof foyda" />
+            <div style={{ width: `${Math.min(100, Math.max(0, calcData.tax_share_pct))}%` }} className="bg-rose-400 h-full" title="Soliq" />
+            <div style={{ width: `${Math.min(100, Math.max(0, calcData.uzum_share_pct))}%` }} className="bg-violet-400 h-full" title="Uzum" />
+            <div style={{ width: `${Math.min(100, Math.max(0, calcData.net_share_pct))}%` }} className="bg-brand-500 h-full" title="Sof foyda" />
           </div>
 
           {/* Legend */}
           <div className="grid grid-cols-2 gap-2 text-[10px] font-semibold text-slate-600 dark:text-slate-300 pt-1">
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-slate-400 dark:bg-slate-500 flex-shrink-0" />
-              <span className="truncate">{t.calc_cost_price}: <b className="text-slate-900 dark:text-white">{calcData.cost_share_pct}%</b></span>
+            <div className="flex items-start space-x-1.5">
+              <span className="mt-0.5 w-2.5 h-2.5 rounded-sm bg-slate-400 dark:bg-slate-500 flex-shrink-0" />
+              <span className="leading-tight">{t.calc_cost_price}: <b className="text-slate-900 dark:text-white">{calcData.cost_share_pct}%</b></span>
             </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-rose-500 flex-shrink-0" />
-              <span className="truncate">{t.kpi_tax_payable}: <b className="text-slate-900 dark:text-white">{calcData.tax_share_pct}%</b></span>
+            <div className="flex items-start space-x-1.5">
+              <span className="mt-0.5 w-2.5 h-2.5 rounded-sm bg-rose-400 flex-shrink-0" />
+              <span className="leading-tight">{t.kpi_tax_payable}: <b className="text-slate-900 dark:text-white">{calcData.tax_share_pct}%</b></span>
             </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-purple-500 flex-shrink-0" />
-              <span className="truncate">Uzum harajati: <b className="text-slate-900 dark:text-white">{calcData.uzum_share_pct}%</b></span>
+            <div className="flex items-start space-x-1.5">
+              <span className="mt-0.5 w-2.5 h-2.5 rounded-sm bg-violet-400 flex-shrink-0" />
+              <span className="leading-tight">Uzum harajati: <b className="text-slate-900 dark:text-white">{calcData.uzum_share_pct}%</b></span>
             </div>
-            <div className="flex items-center space-x-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 flex-shrink-0" />
-              <span className="truncate">{t.kpi_net_profit}: <b className="text-emerald-600 dark:text-emerald-400">{calcData.net_share_pct}%</b></span>
+            <div className="flex items-start space-x-1.5">
+              <span className="mt-0.5 w-2.5 h-2.5 rounded-sm bg-brand-500 flex-shrink-0" />
+              <span className="leading-tight">{t.kpi_net_profit}: <b className="text-brand-700 dark:text-teal-300">{calcData.net_share_pct}%</b></span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Multi-Channel Comparison Matrix (Item 14) */}
+      {/* Channel comparison (collapsed) */}
       {calcData && (
-        <div className="glass-card rounded-2xl p-4 border border-brand-200/60 dark:border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
-              <TrendingUp className="w-4 h-4 text-brand-600 dark:text-teal-400" />
-              <span>{t.channel_compare_title}</span>
-            </span>
-          </div>
-
+        <Collapsible icon={TrendingUp} title={t.channel_compare_title} summary={compareSummary}>
           <div className="grid grid-cols-3 gap-2 text-center">
             {/* Column 1: Direct / Showroom */}
             {(() => {
@@ -654,7 +592,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               );
             })()}
           </div>
-        </div>
+        </Collapsible>
       )}
 
       {/* DEDICATED TAX BREAKDOWN CARD */}
@@ -696,95 +634,86 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               <Building2 className="w-4 h-4 text-brand-600 dark:text-teal-400 flex-shrink-0" />
               <span className="font-semibold text-slate-700 dark:text-slate-300">{t.social_tax_fixed_monthly}</span>
             </div>
-            <span className="font-black text-slate-900 dark:text-white">
-              {formatMoney(calcData.social_tax_monthly)} {t.currency} <span className="text-[10px] font-normal text-slate-500">{t.per_month}</span>
+            <span className="font-black text-slate-900 dark:text-white text-right whitespace-nowrap">
+              {formatMoney(calcData.social_tax_monthly)} {t.currency}
+              <span className="block text-[10px] font-normal text-slate-500">{t.per_month}</span>
             </span>
           </div>
 
-          {/* Self-Employed Legality Callout */}
+          {/* Self-employed legality: one line, details on demand */}
           <div className={`p-2.5 rounded-xl border flex items-start space-x-2 text-[11px] leading-relaxed ${
             calcData.self_employed_allowed
-              ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200 text-emerald-800 dark:text-emerald-300'
+              ? 'bg-brand-50/70 dark:bg-teal-950/30 border-brand-200 dark:border-teal-900 text-brand-900 dark:text-teal-200'
               : 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 text-amber-900 dark:text-amber-200'
           }`}>
             {calcData.self_employed_allowed ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <CheckCircle2 className="w-4 h-4 text-brand-600 dark:text-teal-400 flex-shrink-0 mt-0.5" />
             ) : (
               <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
             )}
-            <div>
-              <div className="font-bold mb-0.5">
-                {t.self_employed_status_label}{' '}
-                <span className={calcData.self_employed_allowed ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}>
-                  {calcData.self_employed_allowed ? t.status_allowed : t.status_forbidden}
-                </span>
+            <div className="space-y-1">
+              <div className="font-bold">
+                {calcData.self_employed_allowed ? t.status_allowed : t.status_forbidden}
               </div>
-              <p className="text-[10px] opacity-90">{calcData.self_employed_warning}</p>
+              <Disclosure label={t.what_it_means}>{calcData.self_employed_warning}</Disclosure>
             </div>
           </div>
         </div>
       )}
 
-      {/* Visual Revenue Breakdown Progress Bar */}
-      {calcData && calcData.sale_price > 0 && (
-        <div className="glass-card rounded-2xl p-3.5 space-y-2 border border-slate-200/70 dark:border-slate-800">
-          <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-            <span className="flex items-center space-x-1.5">
-              <Layers className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span>{t.breakdown_title}</span>
-            </span>
-            <span className="text-[11px] font-semibold text-slate-500">100%</span>
-          </div>
-
-          {/* Bar */}
-          <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-100 dark:bg-slate-800">
-            <div 
-              style={{ width: `${Math.min(100, calcData.cost_share_pct)}%` }} 
-              className="bg-amber-400 dark:bg-amber-500 transition-all duration-300"
-              title={`${t.breakdown_cost}: ${calcData.cost_share_pct}%`}
-            />
-            <div 
-              style={{ width: `${Math.min(100 - calcData.cost_share_pct, calcData.tax_share_pct)}%` }} 
-              className="bg-red-500 dark:bg-red-400 transition-all duration-300"
-              title={`Налог: ${calcData.tax_share_pct}%`}
-            />
-            <div 
-              style={{ width: `${Math.min(100 - calcData.cost_share_pct - calcData.tax_share_pct, calcData.uzum_share_pct)}%` }} 
-              className="bg-purple-500 dark:bg-purple-400 transition-all duration-300"
-              title={`${t.breakdown_uzum}: ${calcData.uzum_share_pct}%`}
-            />
-            <div 
-              style={{ width: `${Math.max(0, 100 - calcData.cost_share_pct - calcData.tax_share_pct - calcData.uzum_share_pct)}%` }} 
-              className="bg-emerald-500 dark:bg-emerald-400 transition-all duration-300"
-              title={`${t.breakdown_profit}: ${calcData.net_share_pct}%`}
-            />
-          </div>
-
-          {/* Legend */}
-          <div className="grid grid-cols-4 gap-1 pt-1 text-[9px] font-medium text-slate-600 dark:text-slate-400">
-            <div className="flex items-center space-x-1">
-              <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-              <span className="truncate">{t.breakdown_cost} ({calcData.cost_share_pct}%)</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
-              <span className="truncate">Soliq ({calcData.tax_share_pct}%)</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <span className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0" />
-              <span className="truncate">Uzum ({calcData.uzum_share_pct}%)</span>
-            </div>
-            <div className="flex items-center space-x-1 justify-end">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
-              <span className="truncate font-bold text-emerald-700 dark:text-emerald-400">{t.breakdown_profit} ({calcData.net_share_pct}%)</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Channel Cards */}
+      {/* Channel details (collapsed): Uzum, Telegram, break-even */}
       {calcData && (
-        <div className="space-y-3">
+        <Collapsible icon={ShoppingBag} title={t.channel_details_title} summary={t.channel_details_summary}>
+        {/* Channel Navigation Pills */}
+        <div>
+          <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200/60 dark:border-slate-700/60 text-center">
+            <button
+              type="button"
+              onClick={() => { hapticImpact('light'); setChannelTab('all'); }}
+              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
+                channelTab === 'all'
+                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
+              }`}
+            >
+              {t.channel_tab_all}
+            </button>
+            <button
+              type="button"
+              onClick={() => { hapticImpact('light'); setChannelTab('uzum'); }}
+              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
+                channelTab === 'uzum'
+                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
+              }`}
+            >
+              {t.channel_tab_uzum}
+            </button>
+            <button
+              type="button"
+              onClick={() => { hapticImpact('light'); setChannelTab('telegram'); }}
+              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
+                channelTab === 'telegram'
+                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
+              }`}
+            >
+              {t.channel_tab_telegram}
+            </button>
+            <button
+              type="button"
+              onClick={() => { hapticImpact('light'); setChannelTab('breakeven'); }}
+              className={`py-1.5 text-[11px] font-bold rounded-lg transition-all ${
+                channelTab === 'breakeven'
+                  ? 'bg-white dark:bg-slate-700 text-brand-800 dark:text-teal-300 shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800'
+              }`}
+            >
+              {t.channel_tab_breakeven}
+            </button>
+          </div>
+        </div>
+
           {/* Card 1: Uzum Marketplace */}
           {(channelTab === 'all' || channelTab === 'uzum' || channelTab === 'breakeven') && (
             <div className="glass-card rounded-2xl p-4 border border-purple-200/80 dark:border-purple-800/60 shadow-sm space-y-2.5">
@@ -827,10 +756,10 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
 
           {/* Card 2: Telegram / Instagram Direct sales */}
           {(channelTab === 'all' || channelTab === 'telegram') && (
-            <div className="glass-card rounded-2xl p-4 border border-sky-200/80 dark:border-sky-800/60 shadow-sm space-y-2.5">
+            <div className="glass-card rounded-2xl p-4 border border-teal-200/80 dark:border-teal-800/60 shadow-sm space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <div className="w-7 h-7 rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 flex items-center justify-center">
+                  <div className="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 flex items-center justify-center">
                     <Send className="w-4 h-4" />
                   </div>
                   <div>
@@ -838,7 +767,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                     <span className="text-[10px] text-slate-500 dark:text-slate-400">Click / Payme / Instagram Direct</span>
                   </div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
                   1.5% эквайринг
                 </span>
               </div>
@@ -846,7 +775,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800 text-xs">
                 <div>
                   <span className="text-slate-500 dark:text-slate-400 block text-[11px]">{t.telegram_acquiring_label}</span>
-                  <span className="font-bold text-sky-800 dark:text-sky-300">
+                  <span className="font-bold text-teal-800 dark:text-teal-300">
                     {formatMoney(calcData.telegram_acquiring_fee)} {t.currency}
                   </span>
                 </div>
@@ -858,8 +787,8 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                 </div>
               </div>
 
-              <div className="text-[11px] text-slate-600 dark:text-slate-400 bg-sky-50/50 dark:bg-sky-950/30 p-2 rounded-lg border border-sky-100 dark:border-sky-900/40 flex items-start space-x-1.5">
-                <Info className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 flex-shrink-0 mt-0.5" />
+              <div className="text-[11px] text-slate-600 dark:text-slate-400 bg-teal-50/50 dark:bg-teal-950/30 p-2 rounded-lg border border-teal-100 dark:border-teal-900/40 flex items-start space-x-1.5">
+                <Info className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 flex-shrink-0 mt-0.5" />
                 <span>{t.telegram_delivery_tip}</span>
               </div>
             </div>
@@ -867,9 +796,9 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
 
           {/* Card 3: Break-even analysis */}
           {(channelTab === 'all' || channelTab === 'breakeven') && (
-            <div className="glass-card rounded-2xl p-4 border border-indigo-200/80 dark:border-indigo-800/60 shadow-sm space-y-3">
+            <div className="glass-card rounded-2xl p-4 border border-teal-200/80 dark:border-teal-800/60 shadow-sm space-y-3">
               <div className="flex items-center space-x-2">
-                <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 flex items-center justify-center">
+                <div className="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 flex items-center justify-center">
                   <Target className="w-4 h-4" />
                 </div>
                 <div>
@@ -889,7 +818,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                     value={formatMoney(fixedCosts)}
                     onChange={handlePriceInput(setFixedCosts)}
                     placeholder={t.fixed_costs_placeholder}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-bold text-slate-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-bold text-slate-900 dark:text-white"
                   />
                   <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
                     {t.currency}
@@ -905,11 +834,11 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                       {calcData.break_even_units_uzum ? `${calcData.break_even_units_uzum} ${t.units_per_month}` : '—'}
                     </span>
                   </div>
-                  <div className="p-2 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40">
+                  <div className="p-2 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/40">
                     <span className="text-slate-500 dark:text-slate-400 block text-[10px]">
                       {calcData.self_employed_allowed ? t.breakeven_self_label : 'Нужно продать (ЯТТ):'}
                     </span>
-                    <span className="text-base font-extrabold text-indigo-700 dark:text-indigo-300">
+                    <span className="text-base font-extrabold text-teal-700 dark:text-teal-300">
                       {calcData.break_even_units_self ? `${calcData.break_even_units_self} ${t.units_per_month}` : '—'}
                     </span>
                   </div>
@@ -918,33 +847,21 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             </div>
           )}
 
-          {/* China Import & Legal Guidelines Callout */}
-          {businessType === 'resale' && (
-            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-300 dark:border-amber-800/60 text-slate-800 dark:text-slate-200 space-y-1.5">
-              <div className="flex items-center space-x-2 text-amber-700 dark:text-amber-400 font-bold text-xs">
-                <Globe2 className="w-4 h-4 flex-shrink-0" />
-                <span>{t.china_tip_title}</span>
-              </div>
-              <div 
-                className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: calcData.china_import_tip || '' }}
-              />
-            </div>
-          )}
+        </Collapsible>
+      )}
 
-          {/* VAT Threshold Warning Notice */}
-          <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start space-x-2.5">
-            <Info className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                {t.vat_threshold_notice}
-              </h4>
-              <p className="text-[11px] text-amber-800/90 dark:text-amber-300/80 leading-relaxed">
-                {t.vat_threshold_desc}
-              </p>
-            </div>
-          </div>
+      {/* Good to know: legal summary (already contains the China-import notes and the VAT threshold) */}
+      {calcData && (
+        <Collapsible icon={ShieldCheck} title={t.legal_reference_title} summary={t.legal_reference_summary}>
+          <div
+            className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line"
+            dangerouslySetInnerHTML={{ __html: calcData.tip || '' }}
+          />
+        </Collapsible>
+      )}
 
+      {calcData && (
+        <div>
           {/* Action: Copy / Share Calculation */}
           <button
             type="button"
@@ -964,17 +881,6 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             )}
           </button>
 
-          {/* Law Citations Callout */}
-          <div className="p-3.5 rounded-2xl bg-slate-900 dark:bg-slate-950 text-white border border-slate-800 shadow-soft space-y-2">
-            <div className="flex items-center space-x-2 text-teal-300 font-bold text-xs">
-              <ShieldCheck className="w-4 h-4 flex-shrink-0" />
-              <span>{t.legal_reference_title}</span>
-            </div>
-            <div 
-              className="text-[11px] text-slate-300 leading-relaxed space-y-1.5"
-              dangerouslySetInnerHTML={{ __html: calcData.tip || '' }}
-            />
-          </div>
         </div>
       )}
     </div>
