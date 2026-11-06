@@ -63,6 +63,15 @@ def store_photo(value: Optional[str]) -> Optional[str]:
         return value
 
 
+def store_bytes(subdir: str, raw: bytes, ext: str = "png") -> str:
+    """Save raw image bytes under MEDIA_DIR/<subdir>/ and return the "file:" reference."""
+    folder = media_dir() / subdir
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{secrets.token_hex(16)}.{ext}"
+    (folder / name).write_bytes(raw)
+    return f"{FILE_PREFIX}{subdir}/{name}"
+
+
 def resolve_photo(value: Optional[str]) -> Optional[Path]:
     """Absolute path of a stored photo, or None if missing or outside MEDIA_DIR."""
     if not is_stored_file(value):

@@ -128,6 +128,17 @@ def init_db(force: bool = False) -> None:
             except Exception:
                 pass
 
+            # Poster studio: seller branding (per user) and poster data (per card)
+            for table, col, col_def in [
+                ("users", "brand_name", "TEXT"), ("users", "brand_color", "TEXT"),
+                ("users", "brand_contact", "TEXT"), ("users", "brand_logo", "TEXT"),
+                ("generated_cards", "source_photo_url", "TEXT"), ("generated_cards", "poster_config", "TEXT"),
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+                except Exception:
+                    pass
+
             # Demo flags: seeded demo accounts and "quick demo" cards are excluded from public stats
             for table in ("users", "generated_cards"):
                 try:
@@ -426,11 +437,14 @@ def save_generated_card(
     lang: str = "ru",
     user_id: Optional[int] = None,
     is_demo: bool = False,
+    source_photo_url: Optional[str] = None,
+    poster_config: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Save a generated product card to the database for history with optional user_id."""
     try:
         hashtags_json = json.dumps(hashtags, ensure_ascii=False) if isinstance(hashtags, list) else (hashtags or "[]")
         studio_photo_url = store_photo(studio_photo_url)
+        poster_json = json.dumps(poster_config, ensure_ascii=False) if poster_config else None
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -438,13 +452,13 @@ def save_generated_card(
                 INSERT INTO generated_cards (
                     title, description, price_tag, hashtags, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id, is_demo
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_price, desired_price, note, lang, user_id, is_demo, source_photo_url, poster_config
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     title, description, price_tag, hashtags_json, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id, 1 if is_demo else 0
+                    cost_price, desired_price, note, lang, user_id, 1 if is_demo else 0, source_photo_url, poster_json
                 ),
             )
             conn.commit()
@@ -452,6 +466,18 @@ def save_generated_card(
     except Exception as exc:
         logger.error("Failed to save generated card: %s", exc)
         return 0
+
+
+def _poster_fields(card_id: int, raw_config: Optional[str]) -> Dict[str, Any]:
+    """Poster info for API responses: the saved layout/text config and the URL that renders it."""
+    if not raw_config:
+        return {"has_poster": False, "poster_url": None, "poster_config": None}
+    try:
+        config = json.loads(raw_config)
+    except Exception:
+        config = None
+    return {"has_poster": bool(config), "poster_url": f"/api/cards/{card_id}/poster.png" if config else None,
+            "poster_config": config}
 
 
 def get_history(
@@ -469,7 +495,7 @@ def get_history(
                 SELECT id, created_at, title, description, price_tag, hashtags,
                        marketing_tip, studio_photo_url, photoshoot_style,
                        content_tone, content_format, cost_price, desired_price,
-                       note, lang, is_favorite, user_id
+                       note, lang, is_favorite, user_id, poster_config
                 FROM generated_cards
                 WHERE 1=1
             """
@@ -513,6 +539,8 @@ def get_history(
                     "lang": row["lang"],
                     "is_favorite": bool(row["is_favorite"]),
                     "user_id": row["user_id"],
+                    **_poster_fields(row["id"], row["poster_config"]),
+                    "poster_has_scene": bool(row["studio_photo_url"]),
                 })
             return items
     except Exception as exc:
@@ -623,12 +651,13 @@ def delete_history_item(card_id: int, user_id: int) -> bool:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             row = cursor.execute(
-                "SELECT studio_photo_url FROM generated_cards WHERE id = ? AND user_id = ?",
+                "SELECT studio_photo_url, source_photo_url FROM generated_cards WHERE id = ? AND user_id = ?",
                 (card_id, user_id),
             ).fetchone()
             cursor.execute("DELETE FROM generated_cards WHERE id = ? AND user_id = ?", (card_id, user_id))
             if row and cursor.rowcount > 0:
                 delete_photo(row["studio_photo_url"])
+                delete_photo(row["source_photo_url"])
             conn.commit()
             return cursor.rowcount > 0
     except Exception as exc:
@@ -642,10 +671,11 @@ def clear_history(user_id: int) -> bool:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             photos = [
-                r["studio_photo_url"]
+                ref
                 for r in cursor.execute(
-                    "SELECT studio_photo_url FROM generated_cards WHERE user_id = ?", (user_id,)
+                    "SELECT studio_photo_url, source_photo_url FROM generated_cards WHERE user_id = ?", (user_id,)
                 ).fetchall()
+                for ref in (r["studio_photo_url"], r["source_photo_url"])
             ]
             cursor.execute("DELETE FROM generated_cards WHERE user_id = ?", (user_id,))
             for photo in photos:
@@ -655,6 +685,83 @@ def clear_history(user_id: int) -> bool:
     except Exception as exc:
         logger.error("Failed to clear history: %s", exc)
         return False
+
+
+# ===========================================================================
+# Poster studio: per-card poster data and per-user branding
+# ===========================================================================
+
+def get_card_for_poster(card_id: int, user_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    """Photo references and saved poster config of a card (user_id=None: any card, administrators only)."""
+    query = "SELECT id, user_id, title, studio_photo_url, source_photo_url, poster_config, lang FROM generated_cards WHERE id = ?"
+    params: List[Any] = [card_id]
+    if user_id is not None:
+        query += " AND user_id = ?"
+        params.append(user_id)
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(query, params).fetchone()
+            return dict(row) if row else None
+    except Exception as exc:
+        logger.error("Failed to load card %s for poster: %s", card_id, exc)
+        return None
+
+
+def set_card_poster_config(card_id: int, user_id: int, config: Dict[str, Any]) -> bool:
+    try:
+        with get_db_connection() as conn:
+            cur = conn.execute(
+                "UPDATE generated_cards SET poster_config = ? WHERE id = ? AND user_id = ?",
+                (json.dumps(config, ensure_ascii=False), card_id, user_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+    except Exception as exc:
+        logger.error("Failed to save poster config: %s", exc)
+        return False
+
+
+def get_brand(user_id: int) -> Dict[str, Any]:
+    """The seller's branding: shop name, brand colour, contacts and logo reference."""
+    empty = {"brand_name": "", "brand_color": "", "brand_contact": "", "brand_logo": None}
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT brand_name, brand_color, brand_contact, brand_logo FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            if not row:
+                return empty
+            return {k: (row[k] or ("" if k != "brand_logo" else None)) for k in empty}
+    except Exception as exc:
+        logger.error("Failed to load brand: %s", exc)
+        return empty
+
+
+def save_brand(user_id: int, brand_name: str, brand_color: str, brand_contact: str) -> bool:
+    try:
+        with get_db_connection() as conn:
+            conn.execute(
+                "UPDATE users SET brand_name = ?, brand_color = ?, brand_contact = ? WHERE user_id = ?",
+                (brand_name, brand_color, brand_contact, user_id),
+            )
+            conn.commit()
+            return True
+    except Exception as exc:
+        logger.error("Failed to save brand: %s", exc)
+        return False
+
+
+def set_brand_logo(user_id: int, logo_ref: Optional[str]) -> Optional[str]:
+    """Store the logo reference; returns the previous one (so the caller can delete the old file)."""
+    try:
+        with get_db_connection() as conn:
+            old = conn.execute("SELECT brand_logo FROM users WHERE user_id = ?", (user_id,)).fetchone()
+            conn.execute("UPDATE users SET brand_logo = ? WHERE user_id = ?", (logo_ref, user_id))
+            conn.commit()
+            return old["brand_logo"] if old else None
+    except Exception as exc:
+        logger.error("Failed to set brand logo: %s", exc)
+        return None
 
 
 # ===========================================================================
@@ -769,6 +876,7 @@ def get_user(user_id: int) -> Optional[Dict[str, Any]]:
             sub = cursor.fetchone()
             user_dict["is_subscriber"] = bool(sub["is_active"]) if sub else False
             user_dict["is_admin"] = bool(user_dict.get("is_admin", 0))
+            user_dict["has_brand_logo"] = bool(user_dict.pop("brand_logo", None))
             return user_dict
     except Exception as exc:
         logger.error("Failed to get user %s: %s", user_id, exc)
@@ -791,6 +899,7 @@ def get_user_by_tg_id(tg_id: int) -> Optional[Dict[str, Any]]:
             sub = cursor.fetchone()
             user_dict["is_subscriber"] = bool(sub["is_active"]) if sub else False
             user_dict["is_admin"] = bool(user_dict.get("is_admin", 0))
+            user_dict["has_brand_logo"] = bool(user_dict.pop("brand_logo", None))
             return user_dict
     except Exception as exc:
         logger.error("Failed to get user by tg_id %s: %s", tg_id, exc)

@@ -17,9 +17,7 @@ import {
   SlidersHorizontal,
   ChevronDown,
   ChevronUp,
-  Layers,
   Palette,
-  Sun,
   ShoppingBag,
   Crown,
   Heart,
@@ -31,25 +29,24 @@ import {
 } from 'lucide-react';
 import { hapticImpact, hapticNotify, openTelegramShare } from '../utils/telegram';
 import { fireConfetti } from '../utils/confetti';
+import { OutputTypePicker, StylePicker } from './studio/StylePicker';
+import PosterEditor from './studio/PosterEditor';
+import { L as STUDIO_L } from './studio/labels';
 
-const DEFAULT_PROMPTS = {
-  ru: {
-    minimal_studio: "Студийный свет, нейтральный светлый подиум, мягкие тени, профессиональная предметная съёмка 8k",
-    uzbek_heritage: "Традиционный узбекский интерьер, резное дерево, фон с текстурой иката, теплое мягкое освещение",
-    uzum_catalog: "Белоснежный изолированный фон, равномерный e-commerce свет, четкие детали, маркетплейс Uzum",
-    luxury_dark: "Премиальный тёмный мрамор, драматичный акцентный свет, глубокие тени, золотистые блики",
-    natural_light: "Мягкий утренний солнечный свет, фактура натурального дерева, зелень и боке на фоне",
-    custom: "",
-  },
-  uz: {
-    minimal_studio: "Studiya nuri, neytral yorug' podium, yumshoq soyalar, professional 8k katalog fotosurati",
-    uzbek_heritage: "An'anaviy o'zbek milliy interyeri, o'ymakor yog'och, fonida ipak xon-atlas va ikat jilosi, iliq nur",
-    uzum_catalog: "Oppoq fon, bir tekis e-commerce yorug'ligi, aniq detallar, Uzum marketpleys 1:1 standarti",
-    luxury_dark: "Hashamatli qora marmar, dramatik yorug'lik nuri, chuqur soyalar, tillarang jilo, butik uslubi",
-    natural_light: "Tonggi mayin quyosh nuri, tabiiy yog'och fakturasi, orqa fonda yashil barglar va boke effekti",
-    custom: "",
-  }
+// Used until /api/photoshoot-presets answers (and if it never does): the original photo styles only.
+const FALLBACK_REGISTRY = {
+  groups: [{ id: 'photo', icon: 'camera', ru: 'Фото товара', uz: 'Mahsulot surati', hint_ru: 'Красивая сцена вокруг вашего товара', hint_uz: 'Mahsulot atrofida chiroyli sahna' }],
+  styles: [
+    { id: 'minimal_studio', group: 'photo', icon: 'camera', layout: null, featured: true, ru: 'Студийный свет', uz: 'Studiya nuri', tag_ru: 'Каталог', tag_uz: 'Katalog' },
+    { id: 'uzbek_heritage', group: 'photo', icon: 'sparkles', layout: null, featured: true, ru: 'Восточный колорит', uz: 'Sharq ruhi', tag_ru: 'Икат/Атлас', tag_uz: 'Ikat/Atlas' },
+    { id: 'uzum_catalog', group: 'photo', icon: 'shopping', layout: null, featured: true, ru: 'Uzum (белый фон)', uz: 'Uzum (oq fon)', tag_ru: 'Маркетплейс', tag_uz: 'Marketpleys' },
+    { id: 'luxury_dark', group: 'photo', icon: 'crown', layout: null, featured: true, ru: 'Luxury тёмный', uz: 'Hashamatli qora', tag_ru: 'Премиум', tag_uz: 'Premium' },
+    { id: 'natural_light', group: 'photo', icon: 'sun', layout: null, featured: true, ru: 'Природный свет', uz: "Tabiiy yorug'lik", tag_ru: 'Эко/Лайф', tag_uz: 'Eko/Layf' },
+    { id: 'custom', group: 'photo', icon: 'sliders', layout: null, ru: 'Своё описание', uz: "O'z tavsifim", tag_ru: 'Свободный', tag_uz: 'Erkin' },
+  ],
+  layouts: {}, aspects: [], palettes: {},
 };
+let registryCache = null;
 
 export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, userId }) {
   // Form State
@@ -59,22 +56,40 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   const [desiredPrice, setDesiredPrice] = useState('');
   const [note, setNote] = useState('');
   
-  // Customization Presets & Custom Prompt
+  // What to make: output type (photo / poster / promo / marketplace / story), its style and optional wishes
+  const [registry, setRegistry] = useState(registryCache || FALLBACK_REGISTRY);
+  const [outputGroup, setOutputGroup] = useState('photo');
   const [photoshootStyle, setPhotoshootStyle] = useState('minimal_studio');
-  const [photoshootPrompt, setPhotoshootPrompt] = useState(() => {
-    return DEFAULT_PROMPTS[lang]?.minimal_studio || DEFAULT_PROMPTS.ru.minimal_studio;
-  });
+  const [extraWishes, setExtraWishes] = useState('');
   const [contentTone, setContentTone] = useState('luxury');
   const [contentFormat, setContentFormat] = useState('instagram');
   const [generatePhoto, setGeneratePhoto] = useState(true);
+  const sl = STUDIO_L[lang] || STUDIO_L.ru;
 
-  // Sync prompt default when language changes if not customized
   useEffect(() => {
-    if (photoshootStyle !== 'custom') {
-      const def = DEFAULT_PROMPTS[lang]?.[photoshootStyle] || DEFAULT_PROMPTS.ru[photoshootStyle] || '';
-      setPhotoshootPrompt(def);
-    }
-  }, [lang, photoshootStyle]);
+    if (registryCache) return undefined;
+    let alive = true;
+    fetch('/api/photoshoot-presets')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.styles?.length) {
+          registryCache = data;
+          if (alive) setRegistry(data);
+        }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const groupStyles = registry.styles.filter((st) => st.group === outputGroup);
+  const currentStyle = registry.styles.find((st) => st.id === photoshootStyle);
+
+  const handleGroupSelect = (groupId) => {
+    setOutputGroup(groupId);
+    const first = registry.styles.find((st) => st.group === groupId && st.featured) || registry.styles.find((st) => st.group === groupId);
+    if (first) setPhotoshootStyle(first.id);
+    setExtraWishes('');
+  };
 
   // UI Flow State
   const [isLoading, setIsLoading] = useState(false);
@@ -112,7 +127,10 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
 
   useEffect(() => {
     if (externalCardToLoad) {
-      setResult(externalCardToLoad);
+      const card = externalCardToLoad.has_poster && externalCardToLoad.poster_config
+        ? { ...externalCardToLoad, poster: externalCardToLoad.poster_config, poster_has_scene: externalCardToLoad.poster_has_scene }
+        : externalCardToLoad;
+      setResult(card);
       setIsFormCollapsed(true);
       if (externalCardToLoad.studio_photo_url) {
         setActivePhotoView('studio');
@@ -125,29 +143,6 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     }
   }, [externalCardToLoad]);
 
-  // Preset definitions with preview tags (Item 9)
-  const PHOTO_STYLES = [
-    { id: 'minimal_studio', label: t.style_minimal_studio || 'Студийный свет', icon: Camera, tag: 'Каталог' },
-    { id: 'uzbek_heritage', label: t.style_uzbek_heritage || 'Восточный колорит', icon: Sparkles, tag: 'Икат/Атлас' },
-    { id: 'uzum_catalog', label: t.style_uzum_catalog || 'Uzum (белый)', icon: ShoppingBag, tag: '100% белый' },
-    { id: 'luxury_dark', label: t.style_luxury_dark || 'Luxury тёмный', icon: Crown, tag: 'Премиум' },
-    { id: 'natural_light', label: t.style_natural_light || 'Природный свет', icon: Sun, tag: 'Эко/Лайф' },
-    { id: 'custom', label: t.style_custom || 'Свой промпт', icon: SlidersHorizontal, tag: 'Свободный' },
-  ];
-
-  const handleStyleSelect = (styleId) => {
-    hapticImpact('light');
-    setPhotoshootStyle(styleId);
-    if (styleId === 'custom') {
-      const prevDef = DEFAULT_PROMPTS[lang]?.[photoshootStyle] || DEFAULT_PROMPTS.ru[photoshootStyle];
-      if (photoshootPrompt === prevDef) {
-        setPhotoshootPrompt('');
-      }
-    } else {
-      const def = DEFAULT_PROMPTS[lang]?.[styleId] || DEFAULT_PROMPTS.ru[styleId] || '';
-      setPhotoshootPrompt(def);
-    }
-  };
 
   const TONES = [
     { id: 'luxury', label: t.tone_luxury || 'Премиум', icon: Crown },
@@ -195,8 +190,9 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     setCostPrice('');
     setDesiredPrice('');
     setNote('');
+    setOutputGroup('photo');
     setPhotoshootStyle('minimal_studio');
-    setPhotoshootPrompt(DEFAULT_PROMPTS[lang]?.minimal_studio || DEFAULT_PROMPTS.ru.minimal_studio);
+    setExtraWishes('');
     setResult(null);
     setErrorMessage('');
     setIsFormCollapsed(false);
@@ -274,7 +270,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     if (note) formData.append('note', note);
     formData.append('lang', lang);
     formData.append('photoshoot_style', photoshootStyle);
-    if (photoshootPrompt) formData.append('photoshoot_prompt', photoshootPrompt);
+    if (extraWishes.trim()) formData.append('photoshoot_prompt', extraWishes.trim());
     formData.append('content_tone', contentTone);
     formData.append('content_format', contentFormat);
     formData.append('generate_photo', generatePhoto ? 'true' : 'false');
@@ -542,16 +538,21 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
             />
           </div>
 
+          {/* What do you want to get? */}
+          {registry.groups.length > 1 && (
+            <OutputTypePicker groups={registry.groups} value={outputGroup} onChange={handleGroupSelect} lang={lang} />
+          )}
+
           {/* AI Photoshoot Toggle (when image is uploaded) */}
           <div className="p-3 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/50 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
               <Camera className="w-4 h-4 text-brand-600 dark:text-teal-400 flex-shrink-0" />
               <div>
                 <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                  {t.ai_photoshoot_toggle}
+                  {outputGroup === 'photo' ? t.ai_photoshoot_toggle : sl.ai_bg_label}
                 </p>
                 <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                  {t.ai_photoshoot_hint}
+                  {outputGroup === 'photo' ? t.ai_photoshoot_hint : (generatePhoto ? sl.ai_bg_hint_on : sl.ai_bg_hint_off)}
                 </p>
               </div>
             </div>
@@ -569,75 +570,42 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
             </label>
           </div>
 
-          {/* Photoshoot Style Selector (Pill chips) */}
-          {generatePhoto && (
+          {/* Output type, then the styles that belong to it */}
+          {(generatePhoto || outputGroup !== 'photo') && (
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center space-x-1.5">
-                <Palette className="w-3.5 h-3.5 text-brand-600 dark:text-teal-400" />
-                <span>{t.style_label}</span>
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {PHOTO_STYLES.map((style) => {
-                  const Icon = style.icon;
-                  const isSelected = photoshootStyle === style.id;
-                  return (
-                    <button
-                      key={style.id}
-                      type="button"
-                      onClick={() => handleStyleSelect(style.id)}
-                      className={`p-2 rounded-xl text-left flex flex-col justify-between border transition-all text-xs font-medium ${
-                        isSelected
-                          ? 'bg-brand-600 text-white border-brand-600 shadow-sm ring-1 ring-brand-500/30'
-                          : 'bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-1.5 w-full">
-                        <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'}`} />
-                        <span className="truncate font-bold text-[11px]">{style.label}</span>
-                      </div>
-                      {style.tag && (
-                        <span className={`text-[8.5px] font-bold mt-1 px-1.5 py-0.2 rounded w-fit ${
-                          isSelected ? 'bg-brand-700/80 text-teal-100' : 'bg-slate-200/80 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                        }`}>
-                          {style.tag}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              <StylePicker styles={groupStyles} value={photoshootStyle} onChange={setPhotoshootStyle} lang={lang} />
 
-              {/* Editable Photoshoot Prompt Field */}
-              <div className="space-y-1 pt-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 flex items-center space-x-1">
-                    <SlidersHorizontal className="w-3 h-3 text-brand-600 dark:text-teal-400" />
-                    <span>{t.photoshoot_prompt_label}</span>
-                  </label>
-                  {photoshootStyle !== 'custom' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        hapticImpact('light');
-                        const def = DEFAULT_PROMPTS[lang]?.[photoshootStyle] || DEFAULT_PROMPTS.ru[photoshootStyle] || '';
-                        setPhotoshootPrompt(def);
-                      }}
-                      className="text-[10px] text-slate-400 hover:text-brand-600 dark:hover:text-teal-400 flex items-center space-x-1 transition-colors"
-                      title={t.reset_prompt}
-                    >
-                      <RotateCcw className="w-2.5 h-2.5" />
-                      <span>{t.reset_prompt}</span>
-                    </button>
+              {photoshootStyle === 'custom' ? (
+                <label className="block space-y-1 pt-1">
+                  <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">{sl.custom_label}</span>
+                  <textarea
+                    value={extraWishes}
+                    onChange={(e) => setExtraWishes(e.target.value)}
+                    rows={3}
+                    placeholder={sl.custom_placeholder}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white resize-none transition-colors"
+                  />
+                </label>
+              ) : (
+                <>
+                  {currentStyle && (currentStyle[`hint_${lang}`] || currentStyle.hint_ru) && (
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                      {currentStyle[`hint_${lang}`] || currentStyle.hint_ru}
+                    </p>
                   )}
-                </div>
-                <textarea
-                  value={photoshootPrompt}
-                  onChange={(e) => setPhotoshootPrompt(e.target.value)}
-                  rows={2}
-                  placeholder={t.photoshoot_prompt_placeholder}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white resize-none transition-colors"
-                />
-              </div>
+                  <label className="block space-y-1">
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">{sl.wishes_label}</span>
+                    <input
+                      type="text"
+                      value={extraWishes}
+                      maxLength={300}
+                      onChange={(e) => setExtraWishes(e.target.value)}
+                      placeholder={sl.wishes_placeholder}
+                      className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white"
+                    />
+                  </label>
+                </>
+              )}
             </div>
           )}
 
@@ -859,7 +827,9 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
           </div>
 
           {/* Photo Section: AI Studio Shoot + Original Toggle */}
-          {(result.studio_photo_url || imagePreview) && (
+          {result.poster && registry.layouts[result.poster.layout] ? (
+            <PosterEditor key={result.id} card={result} registry={registry} lang={lang} />
+          ) : (result.studio_photo_url || imagePreview) && (
             <div className="space-y-2">
               {/* Photo View Switcher if both are available */}
               {result.studio_photo_url && imagePreview && (

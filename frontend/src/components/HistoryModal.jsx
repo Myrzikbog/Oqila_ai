@@ -38,7 +38,11 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
       const data = await res.json();
       // Photo URLs are loaded by <img>, which cannot send the Authorization header
       setHistoryItems(
-        (data.items || []).map((item) => ({ ...item, studio_photo_url: withToken(item.studio_photo_url) })),
+        (data.items || []).map((item) => ({
+          ...item,
+          // a poster is drawn on demand from its saved settings; show it instead of the raw AI scene
+          studio_photo_url: withToken(item.poster_url || item.studio_photo_url),
+        })),
       );
     } catch (err) {
       console.error('Failed to load history:', err);

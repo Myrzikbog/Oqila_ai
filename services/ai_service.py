@@ -16,33 +16,16 @@ import logging
 import os
 from typing import Optional
 
+from services.presets import ASPECTS, DEFAULT_ASPECT, STYLES_BY_ID, STYLES, build_scene_prompt
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Photoshoot Style Presets
 # ---------------------------------------------------------------------------
-PHOTOSHOOT_PRESETS = {
-    "minimal_studio": (
-        "Professional commercial studio photoshoot of this item. Placed on an elegant clean podium, "
-        "soft diffused studio lighting, minimalist neutral beige/white background, ultra sharp 8k product catalog photography"
-    ),
-    "uzbek_heritage": (
-        "Professional product photoshoot in an authentic Uzbek traditional interior. Beautiful carved wood details, "
-        "subtle national silk ikat textures in background, warm ambient lighting, heritage craftsmanship aesthetic"
-    ),
-    "uzum_catalog": (
-        "Clean e-commerce product catalog photo on pure white seamless background, soft balanced commercial lighting, "
-        "subtle natural ground shadow, high commercial sharpness tailored for Uzum Market seller listing"
-    ),
-    "luxury_dark": (
-        "Luxury editorial product photoshoot. Moody dark slate/obsidian background, warm dramatic spotlighting, "
-        "polished dark marble surface, subtle gold reflections, premium high-end boutique aesthetic"
-    ),
-    "natural_light": (
-        "Outdoor lifestyle product photography. Natural warm morning sunlight, organic wooden surface, "
-        "gentle morning breeze, soft green botanical bokeh background, warm aesthetic depth of field"
-    ),
-}
+# Photo styles live in services/presets.py (one registry for backend, frontend and poster layouts).
+# This id -> prompt mapping is kept for backward compatibility.
+PHOTOSHOOT_PRESETS = {style["id"]: style["prompt"] for style in STYLES if style["prompt"]}
 
 TONE_PRESETS = {
     "luxury": "Tone: exclusive, high-end, premium luxury. Emphasize top-notch materials, prestige and bespoke elegance.",
@@ -171,6 +154,7 @@ class AIService:
         content_format: str = "instagram",
         generate_photo: bool = True,
         force_mock: bool = False,
+        aspect_ratio: str = DEFAULT_ASPECT,
     ) -> dict:
         """
         Generate a product marketing card using Gemini Vision & optional AI Photoshoot.
@@ -192,6 +176,7 @@ class AIService:
                 content_tone=content_tone,
                 content_format=content_format,
                 generate_photo=generate_photo,
+                aspect_ratio=aspect_ratio,
             )
         except Exception as exc:
             logger.error("Gemini API error, falling back to mock: %s", exc)
@@ -344,6 +329,7 @@ Rules:
         style_preset: str = "minimal_studio",
         custom_prompt: Optional[str] = None,
         product_description: Optional[str] = None,
+        aspect_ratio: str = DEFAULT_ASPECT,
     ) -> Optional[str]:
         """
         Generate a commercial studio photoshoot image based on uploaded item or description.
@@ -360,21 +346,22 @@ Rules:
         try:
             from google.genai import types as gtypes  # type: ignore
 
-            # Determine final prompt
-            if custom_prompt and custom_prompt.strip():
-                final_prompt = custom_prompt.strip()
-                if product_description and not image_bytes and product_description.lower() not in final_prompt.lower():
-                    final_prompt = f"Commercial product photoshoot of {product_description}. {final_prompt}"
+            # Determine final prompt: the style registry supplies the scene (and, for posters, the calm
+            # areas left for text); wishes typed by the seller are appended, "custom" uses them as is.
+            extra = custom_prompt.strip() if custom_prompt and custom_prompt.strip() else None
+            style = STYLES_BY_ID.get(style_preset)
+            if extra and style and extra in (style.get("hint_ru"), style.get("hint_uz")):
+                extra = None  # the UI sent the style's own description back: not a user wish
+            if style_preset == "custom" and extra:
+                final_prompt = extra
             else:
-                base_style = PHOTOSHOOT_PRESETS.get(style_preset, PHOTOSHOOT_PRESETS["minimal_studio"])
-                if product_description and not image_bytes:
-                    final_prompt = f"Commercial product photoshoot of {product_description}. {base_style}"
-                else:
-                    final_prompt = base_style
+                final_prompt = build_scene_prompt(style_preset, extra)
+            if product_description and not image_bytes and product_description.lower() not in final_prompt.lower():
+                final_prompt = f"Commercial product photoshoot of {product_description}. {final_prompt}"
 
             config = gtypes.GenerateContentConfig(
                 response_modalities=["IMAGE"],
-                image_config=gtypes.ImageConfig(aspect_ratio="1:1"),
+                image_config=gtypes.ImageConfig(aspect_ratio=ASPECTS.get(aspect_ratio, ASPECTS[DEFAULT_ASPECT])["model"]),
             )
 
             if image_bytes:
@@ -421,6 +408,7 @@ Rules:
         content_tone: str = "luxury",
         content_format: str = "instagram",
         generate_photo: bool = True,
+        aspect_ratio: str = DEFAULT_ASPECT,
     ) -> dict:
         from google.genai import types as gtypes  # type: ignore
 
@@ -516,6 +504,7 @@ Return ONLY valid JSON with this exact structure:
                     style_preset=photoshoot_style,
                     custom_prompt=photoshoot_prompt,
                     product_description=note,
+                    aspect_ratio=aspect_ratio,
                 )
             return None
 

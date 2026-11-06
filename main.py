@@ -11,7 +11,7 @@ from datetime import datetime
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Import services (after env is loaded)
 from services.ai_service import ai_service
@@ -46,13 +46,18 @@ from services.database import (
     get_all_users,
     get_history,
     get_history_count,
+    get_brand,
+    get_card_for_poster,
     get_stats,
     get_user,
     get_user_by_tg_id,
     get_users_count,
     init_db,
     log_event,
+    save_brand,
     save_generated_card,
+    set_brand_logo,
+    set_card_poster_config,
     toggle_favorite,
     toggle_user_active,
     update_user_profile,
@@ -63,6 +68,9 @@ from services.legal_calc import (
     LEGAL_STEPS_UZ,
     calculate,
 )
+from services.media_storage import delete_photo, resolve_photo, store_bytes
+from services.poster import PosterSpec, normalize_logo, normalize_source, poster_defaults, poster_to_png, render_poster
+from services.presets import ASPECTS, STYLES_BY_ID, default_aspect, needs_overlay, layout_for, public_registry
 from services.rate_limit import check_user_limit, global_ai_budget_exhausted
 from services.telegram_service import telegram_service
 
@@ -441,6 +449,7 @@ async def generate_card(
     content_tone: str = Form("luxury"),
     content_format: str = Form("instagram"),
     generate_photo: bool = Form(True),
+    aspect_ratio: str = Form(""),
     user_id: Optional[int] = Form(None),  # ignored: the user always comes from the session token
     user: dict = Depends(current_user),
 ):
@@ -455,6 +464,10 @@ async def generate_card(
     if limit_error:
         raise HTTPException(status_code=429, detail=limit_error)
     use_mock = ai_service.is_mock or global_ai_budget_exhausted()
+    if photoshoot_style not in STYLES_BY_ID:
+        photoshoot_style = "minimal_studio"
+    aspect = aspect_ratio if aspect_ratio in ASPECTS else default_aspect(photoshoot_style)
+    overlay = needs_overlay(photoshoot_style)  # poster styles: the server draws the text over the picture
     image_bytes: Optional[bytes] = None
     image_mime = "image/jpeg"
 
@@ -500,7 +513,30 @@ async def generate_card(
         content_format=content_format,
         generate_photo=generate_photo,
         force_mock=use_mock,
+        aspect_ratio=aspect,
     )
+
+    # Poster styles keep the seller's own photo (fallback background in offline mode) and a text config
+    source_ref: Optional[str] = None
+    poster_config: Optional[dict] = None
+    if overlay:
+        if image_bytes:
+            try:
+                source_ref = store_bytes("source", normalize_source(image_bytes), "jpg")
+            except ValueError:
+                source_ref = None
+        brand = get_brand(user_id)
+        poster_config = PosterSpec.from_dict({
+            "layout": layout_for(photoshoot_style),
+            "aspect": aspect,
+            "palette": "custom" if brand["brand_color"] else "brand",
+            "brand_color": brand["brand_color"],
+            "lang": lang,
+            "contact": brand["brand_contact"],
+            "brand_name": brand["brand_name"],
+            "show_logo": bool(brand["brand_logo"]),
+            **poster_defaults(result, desired_price, lang),
+        }).to_dict()
 
     # Save to history database
     card_id = save_generated_card(
@@ -518,8 +554,16 @@ async def generate_card(
         note=note,
         lang=lang,
         user_id=user_id,
+        source_photo_url=source_ref,
+        poster_config=poster_config,
     )
     result["id"] = card_id
+    if poster_config:
+        # The picture is drawn on demand from the config: no need to ship the raw AI scene to the client
+        result["poster_has_scene"] = bool(result.get("studio_photo_url"))
+        result["studio_photo_url"] = None
+        result["poster"] = poster_config
+        result["poster_url"] = f"/api/cards/{card_id}/poster.png"
 
     log_event(
         event_type="generate_card",
@@ -530,6 +574,7 @@ async def generate_card(
             "title": result.get("title", ""),
             "has_image": image_bytes is not None,
             "style": photoshoot_style,
+            "aspect": aspect,
             "tone": content_tone,
             "format": content_format,
             "has_studio_photo": bool(result.get("studio_photo_url")),
@@ -591,13 +636,12 @@ async def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
 
 @app.get("/api/photoshoot-presets")
 async def get_photoshoot_presets():
-    """Return available photoshoot presets and their default prompts."""
-    from services.ai_service import PHOTOSHOOT_PRESETS, TONE_PRESETS, FORMAT_PRESETS
-    return {
-        "styles": PHOTOSHOOT_PRESETS,
-        "tones": TONE_PRESETS,
-        "formats": FORMAT_PRESETS,
-    }
+    """Registry of everything the studio can produce: output types, styles, layouts, aspect ratios, palettes."""
+    from services.ai_service import TONE_PRESETS, FORMAT_PRESETS
+    registry = public_registry()
+    registry["tones"] = TONE_PRESETS
+    registry["formats"] = FORMAT_PRESETS
+    return registry
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +738,154 @@ def _card_photo_response(card_id: int, owner_id: Optional[int]) -> Response:
 async def get_card_photo(card_id: int, user: dict = Depends(current_user_for_media)):
     """Serve the studio photo of one of the user's cards."""
     return _card_photo_response(card_id, owner_id=user["user_id"])
+
+
+# ---------------------------------------------------------------------------
+# Poster studio: render posters, manage the seller's branding
+# ---------------------------------------------------------------------------
+class PosterRequest(BaseModel):
+    layout: Optional[str] = None
+    aspect: Optional[str] = None
+    palette: Optional[str] = None
+    brand_color: Optional[str] = None
+    lang: Optional[str] = None
+    title: Optional[str] = None
+    price: Optional[str] = None
+    old_price: Optional[str] = None
+    bullets: Optional[List[str]] = Field(default=None, max_length=8)
+    badge_text: Optional[str] = None
+    deadline: Optional[str] = None
+    contact: Optional[str] = None
+    cta: Optional[str] = None
+    brand_name: Optional[str] = None
+    show_logo: Optional[bool] = None
+
+
+class BrandRequest(BaseModel):
+    brand_name: str = ""
+    brand_color: str = ""
+    brand_contact: str = ""
+
+
+def _open_image(ref: Optional[str]):
+    """Open a stored picture (file reference or legacy inline data URL) as a PIL image, or None."""
+    import base64
+    import io
+    from PIL import Image
+
+    if not ref:
+        return None
+    try:
+        path = resolve_photo(ref)
+        if path:
+            img = Image.open(path)
+        elif ref.startswith("data:") and "," in ref:
+            img = Image.open(io.BytesIO(base64.b64decode(ref.split(",", 1)[1])))
+        else:
+            return None
+        img.load()
+        return img
+    except Exception as exc:
+        logger.warning("Could not open stored picture: %s", exc)
+        return None
+
+
+async def _render_card_poster(card: dict, config: dict) -> bytes:
+    """Render a card's poster off the event loop: AI scene if there is one, else the seller's own photo."""
+    import asyncio
+
+    spec = PosterSpec.from_dict(config)
+    brand_logo = get_brand(card["user_id"])["brand_logo"] if card.get("user_id") else None
+
+    def work() -> bytes:
+        background = _open_image(card.get("studio_photo_url"))
+        source = None if background is not None else _open_image(card.get("source_photo_url"))
+        logo = _open_image(brand_logo) if spec.show_logo else None
+        return poster_to_png(render_poster(spec, background=background, source=source, logo=logo))
+
+    return await asyncio.get_running_loop().run_in_executor(None, work)
+
+
+@app.post("/api/cards/{card_id}/poster")
+async def render_and_save_poster(card_id: int, req: PosterRequest, user: dict = Depends(current_user)):
+    """Draw the poster from the edited text and save the settings. No AI call: editing is free."""
+    card = get_card_for_poster(card_id, user["user_id"])
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+    limit_error = check_user_limit("poster_render", user["user_id"], req.lang or card.get("lang") or "ru")
+    if limit_error:
+        raise HTTPException(status_code=429, detail=limit_error)
+    config = PosterSpec.from_dict(req.model_dump(exclude_none=True)).to_dict()
+    png = await _render_card_poster(card, config)
+    set_card_poster_config(card_id, user["user_id"], config)
+    log_event(event_type="poster_render", lang=config["lang"], is_mock=True, details={"card_id": card_id, "layout": config["layout"]}, user_id=user["user_id"])
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/cards/{card_id}/poster.png")
+async def get_card_poster(card_id: int, user: dict = Depends(current_user_for_media)):
+    """The saved poster of one of the user's cards (for <img> tags and the history)."""
+    import json
+
+    card = get_card_for_poster(card_id, user["user_id"])
+    if not card or not card.get("poster_config"):
+        raise HTTPException(status_code=404, detail="Poster not found")
+    png = await _render_card_poster(card, json.loads(card["poster_config"]))
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, max-age=60"})
+
+
+def _brand_response(user_id: int) -> dict:
+    brand = get_brand(user_id)
+    return {"brand_name": brand["brand_name"], "brand_color": brand["brand_color"],
+            "brand_contact": brand["brand_contact"], "has_logo": bool(brand["brand_logo"])}
+
+
+@app.get("/api/brand")
+async def get_brand_endpoint(user: dict = Depends(current_user)):
+    """The seller's branding: shop name, brand colour, contacts, logo flag."""
+    return _brand_response(user["user_id"])
+
+
+@app.put("/api/brand")
+async def save_brand_endpoint(req: BrandRequest, user: dict = Depends(current_user)):
+    import re
+
+    color = req.brand_color.strip()
+    if color and not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        raise HTTPException(status_code=400, detail="brand_color must look like #0f766e")
+    clean = lambda v, n: " ".join(v.split())[:n]  # noqa: E731
+    save_brand(user["user_id"], clean(req.brand_name, 32), color.lower(), clean(req.brand_contact, 48))
+    return _brand_response(user["user_id"])
+
+
+@app.post("/api/brand/logo")
+async def upload_brand_logo(logo: UploadFile = File(...), user: dict = Depends(current_user)):
+    raw = await logo.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Logo must be 2 MB or smaller")
+    try:
+        png = normalize_logo(raw)
+    except ValueError:
+        raise HTTPException(status_code=415, detail="Upload a PNG, JPG or WEBP image")
+    old = set_brand_logo(user["user_id"], store_bytes("brand", png, "png"))
+    delete_photo(old)
+    return _brand_response(user["user_id"])
+
+
+@app.delete("/api/brand/logo")
+async def delete_brand_logo(user: dict = Depends(current_user)):
+    delete_photo(set_brand_logo(user["user_id"], None))
+    return _brand_response(user["user_id"])
+
+
+@app.get("/api/brand/logo.png")
+async def get_brand_logo(user: dict = Depends(current_user_for_media)):
+    from fastapi.responses import FileResponse
+
+    path = resolve_photo(get_brand(user["user_id"])["brand_logo"])
+    if not path:
+        raise HTTPException(status_code=404, detail="No logo")
+    return FileResponse(str(path), media_type="image/png", headers={"Cache-Control": "private, max-age=60"})
 
 
 @app.delete("/api/history")
