@@ -9,14 +9,13 @@ from conftest import auth, login, media_qs
 
 pytestmark = pytest.mark.usefixtures("fake_ai")  # cards are only saved for real AI answers
 from services import poster as poster_mod
+from services.copy_utils import default_copy as poster_defaults
+from services.imaging import normalize_logo, normalize_source
 from services.poster import (
     PosterSpec,
     contrast_ratio,
     fit_text,
     keep_numbers_together,
-    normalize_logo,
-    normalize_source,
-    poster_defaults,
     readable_on,
     render_poster,
     resolve_colors,

@@ -106,3 +106,22 @@ def corner_whiteness(raw: bytes) -> int:
     for x, y in ((0, 0), (w - box, 0), (0, h - box), (w - box, h - box)):
         values.append(min(img.crop((x, y, x + box, y + box)).resize((1, 1), Image.BOX).getpixel((0, 0))))
     return min(values)
+
+
+def normalize_logo(raw: bytes, max_side: int = 512) -> bytes:
+    """Validate an uploaded logo and return it as a small PNG (raises ValueError if it is not an image)."""
+    img = ImageOps.exif_transpose(open_checked(raw)).convert("RGBA")
+    img.thumbnail((max_side, max_side), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def normalize_source(raw: bytes, max_side: int = 2048) -> bytes:
+    """Validate the seller's photo and return a compact JPEG (raises ValueError if it is not an image).
+    The same JPEG is stored and sent to the AI: no raw client bytes go any further."""
+    img = ImageOps.exif_transpose(open_checked(raw)).convert("RGB")
+    img.thumbnail((max_side, max_side), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=88, optimize=True)
+    return buf.getvalue()

@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from services.imaging import finalize_card, to_data_url
 from services.info_photo import InfoSpec, build_info_prompt, build_spec, expected_strings, find_missing, find_unexpected
-from services.poster import poster_defaults
+from services.copy_utils import default_copy
 from services.presets import ASPECTS, DEFAULT_ASPECT, STYLES_BY_ID, STYLES, build_scene_prompt, style_kind
 
 from services.rate_limit import record_ai_call
@@ -667,7 +667,7 @@ If unsure, use general words about look and mood (colour, style, gift idea).
             for key in ("title", "description", "price_tag", "hashtags", "marketing_tip"):
                 text_result.setdefault(key, "")
             spec = build_spec(
-                text_result.get("info") or {}, info_text, poster_defaults(text_result, None, lang)["title"], lang, allowed_text=note
+                text_result.get("info") or {}, info_text, default_copy(text_result, None, lang)["title"], lang, allowed_text=note
             )
             if generate_photo and image_bytes:
                 info = await self.generate_info_photo(image_bytes, image_mime, photoshoot_style, spec, aspect_ratio)

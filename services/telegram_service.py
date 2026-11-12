@@ -1248,7 +1248,7 @@ class TelegramService:
             caption_text = msg.get("caption", "")
             default_note = "Ремесленное или национальное изделие" if user_lang == "ru" else "Hunarmandchilik yoki milliy mahsulot"
             try:
-                from services.poster import normalize_source
+                from services.imaging import normalize_source
                 file_bytes = await asyncio.get_running_loop().run_in_executor(None, normalize_source, file_bytes)
             except ValueError:
                 await self.send_message(chat_id, err_msg_bad_photo(user_lang))

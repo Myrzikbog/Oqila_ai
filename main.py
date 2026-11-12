@@ -74,11 +74,11 @@ from services.legal_calc import (
     calculate,
 )
 from services.media_storage import delete_photo, resolve_photo, store_bytes
-from services.poster import PosterSpec, normalize_logo, normalize_source, poster_defaults, poster_to_png, render_poster
+from services.poster import PosterSpec, poster_to_png, render_poster
 from services.info_photo import InfoSpec, build_spec
-from services.poster import format_price
+from services.copy_utils import default_copy, format_price
 from services.presets import ASPECTS, STYLES_BY_ID, default_aspect, needs_overlay, layout_for, public_registry, style_kind
-from services.imaging import ImageRejected
+from services.imaging import ImageRejected, normalize_logo, normalize_source
 from services.rate_limit import (
     LimitExceeded,
     check_user_limit,
@@ -605,7 +605,7 @@ async def generate_card(
         if kind == "ai_text":
             info_config = result.get("info")
             if not info_config:
-                defaults = poster_defaults(result, None, lang)
+                defaults = default_copy(result, None, lang)
                 spec = build_spec({"benefits": defaults["bullets"]}, info_text, defaults["title"], lang, allowed_text=note)
                 info_config = {**spec.to_dict(), "verified": None, "missing": [], "unexpected": [], "attempts": 0}
                 result["info"] = info_config
@@ -626,7 +626,7 @@ async def generate_card(
                 "contact": brand["brand_contact"],
                 "brand_name": brand["brand_name"],
                 "show_logo": bool(brand["brand_logo"]),
-                **poster_defaults(result, desired_price, lang),
+                **default_copy(result, desired_price, lang),
             }).to_dict()
             result["display"] = "poster"
 
