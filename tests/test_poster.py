@@ -5,7 +5,9 @@ import sqlite3
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import auth, login
+from conftest import auth, login, media_qs
+
+pytestmark = pytest.mark.usefixtures("fake_ai")  # cards are only saved for real AI answers
 from services import poster as poster_mod
 from services.poster import (
     PosterSpec,
@@ -258,7 +260,7 @@ def test_generate_poster_returns_config_and_a_renderable_poster(client):
     cfg = result["poster"]
     assert cfg["layout"] == "showcase" and cfg["aspect"] == "3:4" and cfg["price"] == "240 000 сум" and cfg["title"]
     assert result["studio_photo_url"] is None, "the raw scene is not shipped to the client"
-    png = client.get(f"{result['poster_url']}?token={who['session_token']}")
+    png = client.get(f"{result['poster_url']}?{media_qs(client, who)}")
     assert png.status_code == 200 and png.headers["content-type"] == "image/png"
     assert Image.open(io.BytesIO(png.content)).size == (1080, 1440)
 
@@ -286,7 +288,7 @@ def test_editing_the_poster_is_free_and_saved(client):
     assert res.status_code == 200 and Image.open(io.BytesIO(res.content)).size == (1080, 1080)
     item = next(i for i in client.get("/api/history", headers=auth(who)).json()["items"] if i["id"] == card_id)
     assert item["has_poster"] and item["poster_url"] and item["poster_config"]["title"] == "Новая цена!"
-    again = client.get(f"/api/cards/{card_id}/poster.png?token={who['session_token']}")
+    again = client.get(f"/api/cards/{card_id}/poster.png?{media_qs(client, who)}")
     assert again.content == res.content, "the saved config renders the same poster"
 
 
@@ -341,7 +343,7 @@ def test_logo_upload_rules(client):
     up = client.post("/api/brand/logo", files={"logo": ("l.png", _png(mode="RGBA"), "image/png")}, headers=auth(who))
     assert up.status_code == 200 and up.json()["has_logo"] is True
     assert client.get("/api/brand/logo.png").status_code == 401
-    logo = client.get(f"/api/brand/logo.png?token={who['session_token']}")
+    logo = client.get(f"/api/brand/logo.png?{media_qs(client, who)}")
     assert logo.status_code == 200 and logo.content[:4] == b"\x89PNG"
     assert client.delete("/api/brand/logo", headers=auth(who)).json()["has_logo"] is False
     assert "brand_logo" not in client.get("/api/profile", headers=auth(who)).json()
@@ -354,7 +356,7 @@ def test_new_posters_use_the_saved_branding(client):
     cfg = _generate(client, who, "poster_showcase")["poster"]
     assert cfg["brand_name"] == "Silk House" and cfg["contact"] == "+998 90 111 22 33"
     assert cfg["palette"] == "custom" and cfg["brand_color"] == "#7c3aed" and cfg["show_logo"] is True
-    png = client.get(f"/api/cards/{_generate(client, who, 'poster_minimal')['id']}/poster.png?token={who['session_token']}")
+    png = client.get(f"/api/cards/{_generate(client, who, 'poster_minimal')['id']}/poster.png?{media_qs(client, who)}")
     assert png.status_code == 200
 
 

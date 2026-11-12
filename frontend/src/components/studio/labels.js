@@ -68,6 +68,8 @@ export const L = {
     exact_hint: 'Тот же текст, нарисованный сервером: ошибок в буквах и цифрах не бывает. Правится бесплатно.',
     ai_fallback_quota: 'ИИ сейчас недоступен (исчерпан лимит сервиса). Ниже образец текста, а не описание вашего товара. Попробуйте позже.',
     ai_fallback_error: 'ИИ сейчас не ответил. Ниже образец текста, а не описание вашего товара. Попробуйте ещё раз.',
+    ai_fallback_text: 'Фото готово, но текст ИИ написать не смог. Попробуйте ещё раз чуть позже.',
+    ai_fallback_not_saved: 'Образец не сохраняется в историю и не расходует ваш лимит.',
     error_regen: 'Не удалось создать карточку. Попробуйте ещё раз.',
   },
   uz: {
@@ -138,6 +140,8 @@ export const L = {
     exact_hint: 'Xuddi shu matn serverda chiziladi: harf va raqamda xato bo\'lmaydi. Bepul tahrirlanadi.',
     ai_fallback_quota: 'AI hozir mavjud emas (xizmat limiti tugagan). Quyida namuna matn, sizning mahsulotingiz tavsifi emas. Keyinroq urinib ko\'ring.',
     ai_fallback_error: 'AI hozir javob bermadi. Quyida namuna matn, sizning mahsulotingiz tavsifi emas. Qayta urinib ko\'ring.',
+    ai_fallback_text: 'Rasm tayyor, lekin AI matn yoza olmadi. Birozdan keyin qayta urinib ko\'ring.',
+    ai_fallback_not_saved: 'Namuna tarixga saqlanmaydi va limitingizni sarflamaydi.',
     error_regen: 'Kartochkani yaratib bo\'lmadi. Qayta urinib ko\'ring.',
   },
 };

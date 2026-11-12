@@ -475,6 +475,8 @@ const COLOR_MAP = new Proxy({}, { get: () => BRAND_COLORS });
 // ---------------------------------------------------------------------------
 // Main Component
 // ---------------------------------------------------------------------------
+import RichText from './RichText';
+
 export default function TabLegal({ lang, t, profile, onOpenProfile }) {
   const faqData = lang === 'uz' ? FAQ_UZ : FAQ_RU;
   const [openId, setOpenId] = useState(null);
@@ -520,7 +522,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
       const fallback = lang === 'uz' ? "Kechirasiz, javob olishda xatolik." : "Ошибка при получении ответа.";
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', text: data.answer || (typeof data.detail === 'string' ? `⏳ ${data.detail}` : fallback) }
+        { role: 'assistant', fallback: Boolean(data.answer && data.ai_fallback), text: data.answer || (typeof data.detail === 'string' ? `⏳ ${data.detail}` : fallback) }
       ]);
       hapticNotify('success');
     } catch (err) {
@@ -769,12 +771,15 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                   ? 'bg-brand-700 text-white font-medium rounded-tr-sm shadow-sm'
                   : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200/80 dark:border-slate-700 rounded-tl-sm shadow-sm'
               }`}>
-                <div
-                  className="whitespace-pre-line"
-                  dangerouslySetInnerHTML={{
-                    __html: m.text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-                  }}
-                />
+                {/* No raw HTML: the user's own words are plain text, the answer gets only safe bold spans */}
+                {m.role === 'user'
+                  ? <div className="whitespace-pre-line">{m.text}</div>
+                  : <RichText text={m.text} />}
+                {m.fallback && (
+                  <p className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                    {lang === 'uz' ? "Bu shablon javob: AI hozir mavjud emas." : 'Это шаблонный ответ: ИИ сейчас недоступен.'}
+                  </p>
+                )}
               </div>
             </div>
           ))}

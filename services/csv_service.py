@@ -39,12 +39,31 @@ LANG_TRANSLATIONS = {
 }
 
 
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def safe_cell(value: Any) -> Any:
+    """Excel and LibreOffice run a cell that starts with = + - @ (or a tab / CR) as a formula. User-supplied text
+    (names, card titles, notes) is prefixed with an apostrophe so it is always shown as plain text."""
+    if isinstance(value, str) and value.startswith(_FORMULA_START):
+        return "'" + value
+    return value
+
+
+class _SafeWriter:
+    def __init__(self, writer: Any) -> None:
+        self._writer = writer
+
+    def writerow(self, row: List[Any]) -> None:
+        self._writer.writerow([safe_cell(v) for v in row])
+
+
 def generate_users_csv(users: List[Dict[str, Any]]) -> bytes:
     """
     Generate a clean, professional, Excel-compatible CSV export of users.
     """
     output = io.StringIO()
-    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    writer = _SafeWriter(csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL))
 
     # Column Headers
     headers = [
@@ -114,7 +133,7 @@ def generate_cards_csv(cards: List[Dict[str, Any]]) -> bytes:
     Generate an Excel-compatible CSV of all generated product cards.
     """
     output = io.StringIO()
-    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    writer = _SafeWriter(csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL))
 
     headers = [
         "№",

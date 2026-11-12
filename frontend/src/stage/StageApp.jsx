@@ -303,7 +303,7 @@ export default function StageApp() {
           <aside className="rounded-3xl bg-slate-900 border border-slate-800 p-6 flex flex-col items-center justify-center text-center gap-4">
             <div className="w-full max-w-xs aspect-square rounded-2xl bg-white p-3">
               {qrSvg ? (
-                <div className="w-full h-full [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: qrSvg }} />
+                <img className="w-full h-full" alt="QR" src={`data:image/svg+xml;utf8,${encodeURIComponent(qrSvg)}`} />
               ) : (
                 <div className="w-full h-full animate-pulse bg-slate-200 rounded-xl" />
               )}

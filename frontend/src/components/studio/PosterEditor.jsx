@@ -3,6 +3,7 @@ import { Download, Share2, Loader2, Palette, LayoutTemplate, Store, Type, Upload
 import Collapsible from '../Collapsible';
 import { hapticImpact, hapticNotify } from '../../utils/telegram';
 import { withToken } from '../../utils/session';
+import { useMediaToken } from '../../utils/useMediaToken';
 import { LayoutGlyph } from './StylePicker';
 import { L, LAYOUT_FIELDS } from './labels';
 
@@ -45,6 +46,7 @@ function Chip({ selected, disabled, onClick, children, className = '' }) {
 
 /** Brand settings: shop name, contacts, colour and logo, set once and used on every poster. */
 function BrandSettings({ lang, cfg, onBrandSaved, onLogoChanged }) {
+  useMediaToken();
   const l = L[lang] || L.ru;
   const [brand, setBrand] = useState({ brand_name: '', brand_color: '', brand_contact: '', has_logo: false });
   const [status, setStatus] = useState('');

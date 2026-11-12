@@ -334,7 +334,14 @@ class UzumService:
     """Core service for Uzum Market Seller OpenAPI integration and Telegram notifications."""
 
     def __init__(self):
-        self._lock = asyncio.Lock()
+        # One lock per user: connecting one seller's shop must not make every other seller wait
+        self._locks: Dict[int, asyncio.Lock] = {}
+
+    def _user_lock(self, user_id: int) -> asyncio.Lock:
+        lock = self._locks.get(user_id)
+        if lock is None:
+            lock = self._locks[user_id] = asyncio.Lock()
+        return lock
 
     def _get_headers(self, api_key: str) -> Dict[str, str]:
         token = api_key.strip()
@@ -358,7 +365,7 @@ class UzumService:
         Validate API key or initialize Demo mode.
         Fetches shops from Uzum OpenAPI (/v1/shops) or loads demo dataset.
         """
-        async with self._lock:
+        async with self._user_lock(user_id):
             if is_demo or not api_key:
                 logger.info("Initializing Uzum Service in DEMO mode.")
                 reset_uzum_data(user_id)
@@ -1012,8 +1019,8 @@ class UzumService:
         with 1-click confirmation buttons to that user's own chat.
         """
         settings = get_uzum_settings(user_id)
-        if not settings.get("notifications_enabled"):
-            return 0
+        if not settings.get("notifications_enabled") or settings.get("is_demo"):
+            return 0  # demo orders are invented: no "new order" pushes about them
 
         from services.database import get_user
         owner = get_user(user_id) or {}

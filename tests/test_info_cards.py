@@ -7,7 +7,7 @@ import types
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import auth, login
+from conftest import auth, login, media_qs
 from services import ai_service as ai_module
 from services.imaging import MAX_BYTES, corner_whiteness, finalize_card, to_data_url
 from services.info_photo import (
@@ -291,7 +291,14 @@ def _generate(client, who, style, facts="", **extra):
     return res.json()
 
 
-def test_offline_info_card_falls_back_to_the_exact_poster(client):
+def test_offline_generation_is_flagged_and_not_saved(client):
+    who = login(client, tg_id=970010)
+    res = _generate(client, who, "info_table", "Диаметр: 32 см")
+    assert res["ai_fallback"] == "no_key" and res["id"] is None and res["studio_photo_url"] is None
+    assert client.get("/api/history", headers=auth(who)).json()["items"] == [], "sample text never lands in the history"
+
+
+def test_info_card_without_a_picture_keeps_the_exact_poster(client, fake_ai):
     who = login(client, tg_id=970001)
     res = _generate(client, who, "info_table", "Диаметр: 32 см\nМатериал: Керамика\nРучная роспись")
     assert res["display"] == "poster" and res["studio_photo_url"] is None
@@ -299,13 +306,13 @@ def test_offline_info_card_falls_back_to_the_exact_poster(client):
     assert info["verified"] is None and ("Диаметр", "32 см") in [tuple(s.values()) for s in info["specs"]] or {"name": "Диаметр", "value": "32 см"} in info["specs"]
     assert res["poster"]["layout"] == "callouts" and "Диаметр: 32 см" in res["poster"]["bullets"] + ["Диаметр: 32 см"]
     assert res["poster"]["price"] == "", "no price on the card unless the seller gave one"
-    png = client.get(f"{res['poster_url']}?token={who['session_token']}")
+    png = client.get(f"{res['poster_url']}?{media_qs(client, who)}")
     assert png.status_code == 200 and Image.open(io.BytesIO(png.content)).size == (1080, 1440)
     priced = _generate(client, who, "info_table", "", desired_price="240000")
     assert priced["poster"]["price"] == "240 000 сум"
 
 
-def test_info_card_is_saved_for_the_history(client):
+def test_info_card_is_saved_for_the_history(client, fake_ai):
     who = login(client, tg_id=970002)
     card = _generate(client, who, "info_callouts", "Ручная роспись")
     item = next(i for i in client.get("/api/history", headers=auth(who)).json()["items"] if i["id"] == card["id"])
@@ -325,7 +332,7 @@ def _fake_ai_generation(monkeypatch, verified=True):
                      "unexpected": [], "attempts": 1 if verified else 3},
         }
 
-    monkeypatch.setattr(ai_module.AIService, "_call_gemini_multimodal", fake_multimodal)
+    monkeypatch.setattr(ai_module.ai_service, "_call_gemini_multimodal", types.MethodType(fake_multimodal, ai_module.ai_service))
     monkeypatch.setattr(ai_module.ai_service, "_client", object())
     monkeypatch.setattr(ai_module.ai_service, "ai_mode", "gemini")
     return photo
@@ -363,15 +370,14 @@ def test_regenerating_with_edited_text(client, monkeypatch):
     assert client.post(f"/api/cards/{card['id']}/info-photo", json={}).status_code == 401
 
 
-def test_regenerate_rules(client, monkeypatch):
+def test_regenerate_rules(client, monkeypatch, fake_ai):
     who = login(client, tg_id=970006)
     plain = _generate(client, who, "flat_lay")
     assert client.post(f"/api/cards/{plain['id']}/info-photo", json={}, headers=auth(who)).status_code == 400
-    offline = _generate(client, who, "info_table")
-    assert client.post(f"/api/cards/{offline['id']}/info-photo", json={}, headers=auth(who)).status_code == 503, "AI is off in tests"
-
-    _fake_ai_generation(monkeypatch)
     online = _generate(client, who, "info_table")
+    monkeypatch.setattr(ai_module.ai_service, "ai_mode", "mock")
+    assert client.post(f"/api/cards/{online['id']}/info-photo", json={}, headers=auth(who)).status_code == 503, "AI is off"
+    monkeypatch.setattr(ai_module.ai_service, "ai_mode", "gemini")
 
     async def broken(self, *a, **k):
         return {"photo_url": None, "verified": False, "missing": [], "unexpected": [], "attempts": 3}
@@ -393,7 +399,7 @@ def test_regenerating_counts_against_the_ai_limit(client, monkeypatch):
     assert client.post(f"/api/cards/{card['id']}/info-photo", json={}, headers=auth(who)).status_code == 429
 
 
-def test_clean_uzum_card_keeps_the_original_for_later(client):
+def test_clean_uzum_card_keeps_the_original_for_later(client, fake_ai):
     from services.database import DB_PATH
     import sqlite3
 
@@ -426,7 +432,9 @@ def test_ai_failure_is_reported_instead_of_passing_sample_text_as_real(client, m
     monkeypatch.setattr(ai_module.ai_service, "_client", object())
     monkeypatch.setattr(ai_module.ai_service, "ai_mode", "gemini")
     who = login(client, tg_id=970009)
-    monkeypatch.setattr(ai_module.AIService, "_call_gemini_multimodal", quota_exceeded)
+    monkeypatch.setattr(ai_module.ai_service, "_call_gemini_multimodal", types.MethodType(quota_exceeded, ai_module.ai_service))
     assert _generate(client, who, "info_table")["ai_fallback"] == "quota"
-    monkeypatch.setattr(ai_module.AIService, "_call_gemini_multimodal", broken)
-    assert _generate(client, who, "flat_lay")["ai_fallback"] == "error"
+    monkeypatch.setattr(ai_module.ai_service, "_call_gemini_multimodal", types.MethodType(broken, ai_module.ai_service))
+    failed = _generate(client, who, "flat_lay")
+    assert failed["ai_fallback"] == "error" and failed["id"] is None
+    assert client.get("/api/history", headers=auth(who)).json()["items"] == []

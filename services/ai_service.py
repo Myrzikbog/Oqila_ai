@@ -14,14 +14,31 @@ import base64
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Optional
 
 from services.imaging import finalize_card, to_data_url
 from services.info_photo import InfoSpec, build_info_prompt, build_spec, expected_strings, find_missing, find_unexpected
 from services.poster import poster_defaults
 from services.presets import ASPECTS, DEFAULT_ASPECT, STYLES_BY_ID, STYLES, build_scene_prompt, style_kind
 
+from services.rate_limit import record_ai_call
+
 logger = logging.getLogger(__name__)
+
+# Gemini calls are blocking HTTP requests: they get their own small pool instead of the default executor,
+# so a burst of slow generations cannot starve everything else that uses run_in_executor.
+AI_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="gemini")
+
+
+def _unique(models: List[str]) -> List[str]:
+    return [m for i, m in enumerate(models) if m and m not in models[:i]]
+
+
+def fallback_reason(exc: BaseException) -> str:
+    """"quota" when Gemini refused because of limits or billing, otherwise "error"."""
+    text = str(exc)
+    return "quota" if any(k in text for k in ("RESOURCE_EXHAUSTED", "402", "429", "quota")) else "error"
 
 # ---------------------------------------------------------------------------
 # Photoshoot Style Presets
@@ -119,7 +136,9 @@ class AIService:
         if self.api_key and self.ai_mode != "mock":
             try:
                 from google import genai  # type: ignore
-                self._client = genai.Client(api_key=self.api_key)
+                from google.genai import types as gtypes  # type: ignore
+                timeout_ms = int(os.getenv("GEMINI_TIMEOUT_MS", "45000"))
+                self._client = genai.Client(api_key=self.api_key, http_options=gtypes.HttpOptions(timeout=timeout_ms))
                 logger.info("✅ Gemini client initialized successfully.")
             except Exception as exc:  # pragma: no cover
                 logger.warning("⚠️  Could not initialize Gemini client: %s", exc)
@@ -127,18 +146,49 @@ class AIService:
         else:
             logger.info("ℹ️  Running in MOCK mode (no API key or AI_MODE=mock).")
 
-    @staticmethod
-    def _get_loop() -> asyncio.AbstractEventLoop:
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop
-
     @property
     def is_mock(self) -> bool:
         return self._client is None or self.ai_mode == "mock"
+
+    # -----------------------------------------------------------------------
+    # Models (all from the environment) and the one place that talks to Gemini
+    # -----------------------------------------------------------------------
+    @staticmethod
+    def _text_models() -> List[str]:
+        """Text model, then its fallback (GEMINI_TEXT_MODEL, GEMINI_TEXT_FALLBACK_MODEL)."""
+        return _unique([os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash"), os.getenv("GEMINI_TEXT_FALLBACK_MODEL", "")])
+
+    @classmethod
+    def _legal_models(cls) -> List[str]:
+        return _unique([os.getenv("GEMINI_LEGAL_MODEL", "")] + cls._text_models())
+
+    @classmethod
+    def _ocr_models(cls) -> List[str]:
+        return _unique([os.getenv("GEMINI_VERIFY_MODEL", "")] + cls._text_models())
+
+    async def _generate(self, kind: str, models: List[str], contents: Any, config: Any,
+                        accept: Optional[Callable[[Any], bool]] = None) -> Any:
+        """One Gemini request off the event loop, trying `models` in order. Every attempt is counted in ai_calls.
+
+        `accept` may reject an answer (e.g. an image response without a picture) to try the next model.
+        Raises the last error when every model failed.
+        """
+        loop = asyncio.get_running_loop()
+        last_exc: Optional[BaseException] = None
+        for model in models:
+            def call(m: str = model) -> Any:
+                record_ai_call(kind, m)
+                return self._client.models.generate_content(model=m, contents=contents, config=config)
+            try:
+                response = await loop.run_in_executor(AI_EXECUTOR, call)
+                if accept is None or accept(response):
+                    return response
+                logger.warning("%s model %s returned an unusable answer", kind, model)
+                last_exc = RuntimeError(f"{model} returned an unusable answer")
+            except Exception as exc:
+                logger.warning("%s model %s failed: %s", kind, model, exc)
+                last_exc = exc
+        raise last_exc or RuntimeError("no model configured")
 
     # -----------------------------------------------------------------------
     # Public: generate product card & studio photoshoot
@@ -165,7 +215,10 @@ class AIService:
         force_mock=True returns the offline demo answer without calling Gemini.
         """
         if self.is_mock or force_mock:
-            return self._mock_response(lang, cost_price, desired_price, note)
+            # Sample text that is not about the seller's product: always flagged, never saved as a real card
+            result = self._mock_response(lang, cost_price, desired_price, note)
+            result["ai_fallback"] = "no_key" if self.is_mock else "quota"
+            return result
 
         try:
             return await self._call_gemini_multimodal(
@@ -187,9 +240,12 @@ class AIService:
             logger.error("Gemini API error, falling back to mock: %s", exc)
             result = self._mock_response(lang, cost_price, desired_price, note)
             # The sample text is not about the seller's product: tell the client, so it can say so
-            text = str(exc)
-            result["ai_fallback"] = "quota" if any(k in text for k in ("RESOURCE_EXHAUSTED", "402", "429", "quota")) else "error"
+            result["ai_fallback"] = fallback_reason(exc)
             return result
+
+    def demo_card(self, lang: str, desired_price: Optional[float] = None, note: Optional[str] = None) -> dict:
+        """The built-in sample card of the "quick demo" button: no AI call, and openly a sample."""
+        return self._mock_response(lang, None, desired_price, note)
 
     # -----------------------------------------------------------------------
     # Public: legal Q&A chat
@@ -200,10 +256,14 @@ class AIService:
         lang: str = "ru",
         user_profile: Optional[dict] = None,
         force_mock: bool = False,
-    ) -> str:
-        """Answer a legal/business question about Uzbekistan regulations, personalized with user profile."""
+    ) -> tuple:
+        """Answer a legal/business question about Uzbekistan regulations, personalized with user profile.
+
+        Returns (answer, fallback_reason): the reason is None for a real AI answer and "no_key" / "quota" / "error"
+        when the built-in template text is returned instead.
+        """
         if self.is_mock or force_mock:
-            return self._mock_legal_answer(question, lang, user_profile)
+            return self._mock_legal_answer(question, lang, user_profile), ("no_key" if self.is_mock else "quota")
 
         lang_instruction = (
             "Respond in Uzbek (O'zbek tili, lotin alifbosi)."
@@ -231,7 +291,8 @@ class AIService:
                 "telegram": "Telegram",
                 "offline": "Офлайн-магазин / точка продаж",
             }
-            u_name = user_profile.get("name", "Предпринимательница")
+            u_name = str(user_profile.get("name") or "").strip() or "Предпринимательница"
+            u_first = (u_name.split() or ["Tadbirkor"])[0]
             u_status = status_map.get(user_profile.get("status"), user_profile.get("status", "Не указан"))
             u_cat = category_map.get(user_profile.get("category"), user_profile.get("category", "Не указана"))
             u_chan = channel_map.get(user_profile.get("salesChannel"), user_profile.get("salesChannel", "Не указан"))
@@ -244,7 +305,7 @@ USER BUSINESS PROFILE (Use this to personalize your advice):
 - Канал продаж: {u_chan}
 
 PERSONALIZATION RULES:
-- Address the user warmly by name ({u_name.split()[0]}) in your greeting.
+- Address the user warmly by name ({u_first}) in your greeting.
 - Tailor legal and tax advice to their specific status, niche, and sales channel.
 - If they are self-employed and ask about reselling purchased goods (China, wholesale), explain that since 01.01.2026 ordinary retail trade is excluded from the self-employed list (УП-50), only retail sales on electronic trading platforms are allowed (item 33), and Uzum admits self-employed sellers only with their own products — so for reselling they should register as YaTT.
 - If they sell on Uzum Market, remind them that Uzum is a commission agent and does NOT withhold the tax: the seller pays the 1% turnover tax (ст. 467 НК РУз в ред. ЗРУ-1108) on the full sale amount by the 15th of the next month, and Uzum admits self-employed sellers only with their own products.
@@ -314,19 +375,11 @@ Rules:
                 system_instruction=system_prompt,
                 temperature=0.7,
             )
-            loop = self._get_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: self._client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=question,
-                    config=config,
-                ),
-            )
-            return response.text or self._mock_legal_answer(question, lang, user_profile)
+            response = await self._generate("legal", self._legal_models(), question, config, accept=lambda r: bool(r.text))
+            return response.text, None
         except Exception as exc:
             logger.error("Gemini legal QA error: %s", exc)
-            return self._mock_legal_answer(question, lang, user_profile)
+            return self._mock_legal_answer(question, lang, user_profile), fallback_reason(exc)
 
     # -----------------------------------------------------------------------
     # Internal: AI Studio Photoshoot Image Generation
@@ -335,8 +388,8 @@ Rules:
     def _image_models() -> List[str]:
         """Primary image model, then a fallback: `gemini-3.1-flash-image` spells Russian/Uzbek text correctly,
         the older `gemini-2.5-flash-image` does not (it produced 'Безогсасная'), so it is only a safety net."""
-        models = [os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"), os.getenv("GEMINI_IMAGE_FALLBACK_MODEL", "gemini-2.5-flash-image")]
-        return [m for i, m in enumerate(models) if m and m not in models[:i]]
+        return _unique([os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image"),
+                        os.getenv("GEMINI_IMAGE_FALLBACK_MODEL", "gemini-2.5-flash-image")])
 
     async def _generate_image_bytes(self, contents: Any, aspect_ratio: str = DEFAULT_ASPECT) -> Optional[bytes]:
         """Raw bytes of one generated picture (PNG/JPEG) or None; tries the fallback model if the first one fails."""
@@ -346,20 +399,17 @@ Rules:
             response_modalities=["IMAGE"],
             image_config=gtypes.ImageConfig(aspect_ratio=ASPECTS.get(aspect_ratio, ASPECTS[DEFAULT_ASPECT])["model"]),
         )
-        loop = self._get_loop()
-        for model in self._image_models():
-            try:
-                response = await loop.run_in_executor(
-                    None,
-                    lambda m=model: self._client.models.generate_content(model=m, contents=contents, config=config),
-                )
-                for part in response.parts or []:
-                    if part.inline_data and part.inline_data.data:
-                        return part.inline_data.data
-                logger.warning("Image model %s returned no picture", model)
-            except Exception as exc:
-                logger.warning("Image model %s failed: %s", model, exc)
-        return None
+        def picture(response: Any) -> Optional[bytes]:
+            for part in response.parts or []:
+                if part.inline_data and part.inline_data.data:
+                    return part.inline_data.data
+            return None
+
+        try:
+            response = await self._generate("image", self._image_models(), contents, config, accept=lambda r: picture(r) is not None)
+        except Exception:
+            return None
+        return picture(response)
 
     async def generate_studio_photo(
         self,
@@ -428,15 +478,10 @@ Rules:
             "text exactly letter by letter as written; never correct spelling, never skip anything. "
             'Return JSON: {"lines": ["..."]}.'
         )
-        loop = self._get_loop()
-        model = os.getenv("GEMINI_VERIFY_MODEL", "gemini-2.5-flash")
-        response = await loop.run_in_executor(
-            None,
-            lambda: self._client.models.generate_content(
-                model=model,
-                contents=[gtypes.Part.from_bytes(data=image_png, mime_type="image/png"), prompt],
-                config=gtypes.GenerateContentConfig(response_mime_type="application/json", temperature=0),
-            ),
+        response = await self._generate(
+            "ocr", self._ocr_models(),
+            [gtypes.Part.from_bytes(data=image_png, mime_type="image/png"), prompt],
+            gtypes.GenerateContentConfig(response_mime_type="application/json", temperature=0),
         )
         data = json.loads(response.text or "{}")
         lines = data.get("lines", []) if isinstance(data, dict) else data
@@ -592,18 +637,9 @@ If unsure, use general words about look and mood (colour, style, gift idea).
             temperature=0.7,
         )
 
-        loop = self._get_loop()
-
         # Define text generation worker
         async def text_worker():
-            resp = await loop.run_in_executor(
-                None,
-                lambda: self._client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=text_parts,
-                    config=config,
-                ),
-            )
+            resp = await self._generate("text", self._text_models(), text_parts, config, accept=lambda r: bool(r.text))
             raw = (resp.text or "").strip()
             if raw.startswith("```"):
                 raw = raw.split("```", 2)[1]
@@ -642,13 +678,31 @@ If unsure, use general words about look and mood (colour, style, gift idea).
             text_result["photoshoot_style"] = photoshoot_style
             return text_result
 
-        # Execute text analysis and photoshoot image generation concurrently!
-        text_result, studio_photo_url = await asyncio.gather(text_worker(), photo_worker())
+        # Execute text analysis and photoshoot image generation concurrently.
+        # One failing half must not throw away the other: a finished picture is kept even if the text call failed.
+        text_result, studio_photo_url = await asyncio.gather(text_worker(), photo_worker(), return_exceptions=True)
+        if isinstance(studio_photo_url, BaseException):
+            logger.warning("Studio photo failed: %s", studio_photo_url)
+            studio_photo_url = None
+        if isinstance(text_result, BaseException):
+            if not studio_photo_url:
+                raise text_result
+            logger.error("Text model failed, keeping the picture: %s", text_result)
+            reason = fallback_reason(text_result)
+            # No sample text here: the picture is real, so the card is saved with an honest empty description
+            text_result = {
+                "title": " ".join((note or "").split())[:60], "description": "", "price_tag": "", "hashtags": [],
+                "marketing_tip": "", "ai_fallback": reason, "ai_fallback_scope": "text",
+            }
+        if not isinstance(text_result, dict):
+            raise ValueError("The text model did not return a JSON object")
 
         # Ensure required keys exist
-        for key in ("title", "description", "price_tag", "hashtags", "marketing_tip"):
-            if key not in text_result:
+        for key in ("title", "description", "price_tag", "marketing_tip"):
+            if not isinstance(text_result.get(key), str):
                 text_result[key] = ""
+        if not isinstance(text_result.get("hashtags"), list):
+            text_result["hashtags"] = []
 
         text_result["studio_photo_url"] = studio_photo_url
         text_result["photoshoot_style"] = photoshoot_style
@@ -705,8 +759,9 @@ If unsure, use general words about look and mood (colour, style, gift idea).
     def _mock_legal_answer(self, question: str, lang: str, user_profile: Optional[dict] = None) -> str:
         greeting_ru = ""
         greeting_uz = ""
-        if user_profile and user_profile.get("name"):
-            name = user_profile.get("name", "").split()[0]
+        first = (str((user_profile or {}).get("name") or "").split() or [""])[0]
+        if first:
+            name = first
             greeting_ru = f"👤 Здравствуйте, {name}! С учётом вашего профиля:\n\n"
             greeting_uz = f"👤 Assalomu alaykum, {name}! Sizning profilingiz bo'yicha:\n\n"
 

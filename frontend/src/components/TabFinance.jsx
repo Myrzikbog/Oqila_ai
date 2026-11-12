@@ -28,6 +28,8 @@ import {
 import { hapticImpact } from '../utils/telegram';
 import Collapsible, { Disclosure } from './Collapsible';
 
+import RichText from './RichText';
+
 export default function TabFinance({ lang, t, profile, onOpenProfile }) {
   const [salePrice, setSalePrice] = useState('380000');
   const [costPrice, setCostPrice] = useState('120000');
@@ -853,10 +855,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
       {/* Good to know: legal summary (already contains the China-import notes and the VAT threshold) */}
       {calcData && (
         <Collapsible icon={ShieldCheck} title={t.legal_reference_title} summary={t.legal_reference_summary}>
-          <div
-            className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line"
-            dangerouslySetInnerHTML={{ __html: calcData.tip || '' }}
-          />
+          <RichText text={calcData.tip || ''} className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" />
         </Collapsible>
       )}
 

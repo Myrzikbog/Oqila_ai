@@ -5,6 +5,8 @@ import PosterEditor from './PosterEditor';
 import { StylePicker } from './StylePicker';
 import { hapticImpact, hapticNotify } from '../../utils/telegram';
 import { L } from './labels';
+import { mediaUrl, withToken } from '../../utils/session';
+import { useMediaToken } from '../../utils/useMediaToken';
 
 function Field({ label, children }) {
   return (
@@ -31,6 +33,7 @@ const textToSpecs = (text) =>
  * a text editor for re-drawing it, and the exact-text version drawn by the server.
  */
 export default function InfoCardView({ card, registry, lang, onUpdate }) {
+  useMediaToken();
   const l = L[lang] || L.ru;
   const info = card.info || {};
   const infoStyles = useMemo(() => registry.styles.filter((s) => s.group === 'info'), [registry]);
@@ -93,10 +96,10 @@ export default function InfoCardView({ card, registry, lang, onUpdate }) {
       <p className="flex gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"><Info className="w-4 h-4 flex-shrink-0" />{l.info_unchecked}</p>
     );
 
-  const download = () => {
+  const download = async () => {
     hapticImpact('light');
     const a = document.createElement('a');
-    a.href = card.studio_photo_url;
+    a.href = await mediaUrl(card.studio_photo_url);
     a.download = `oqila-card-${card.id}.jpg`;
     document.body.appendChild(a);
     a.click();
@@ -106,7 +109,7 @@ export default function InfoCardView({ card, registry, lang, onUpdate }) {
   return (
     <div className="space-y-3">
       <div className="relative rounded-2xl overflow-hidden border border-slate-200/80 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 shadow-sm">
-        <img src={card.studio_photo_url} alt={info.title || card.title} className={`w-full h-auto block ${busy ? 'opacity-50' : ''}`} />
+        <img src={withToken(card.studio_photo_url)} alt={info.title || card.title} className={`w-full h-auto block ${busy ? 'opacity-50' : ''}`} />
         {busy && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/60 dark:bg-slate-900/60">
             <Loader2 className="w-6 h-6 animate-spin text-brand-600" />

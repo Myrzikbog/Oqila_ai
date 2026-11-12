@@ -15,6 +15,39 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 CARD_SIZE: Tuple[int, int] = (1080, 1440)
 MAX_BYTES = 5 * 1024 * 1024
 
+# Decompression bombs: a 10000x10000 PNG is a few kilobytes on the wire and 300 MB once decoded.
+MAX_PIXELS = 40_000_000
+Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+UPLOAD_FORMATS = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+
+
+class ImageRejected(ValueError):
+    """An uploaded file that is not an acceptable picture; `reason` is "format", "too_large" or "broken"."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def open_checked(raw: bytes) -> Image.Image:
+    """Open an untrusted picture. The header is validated (real format, pixel count) BEFORE any pixel is decoded;
+    the type comes from the file's magic bytes, never from the client's Content-Type."""
+    try:
+        img = Image.open(io.BytesIO(raw))  # lazy: reads the header only
+    except Image.DecompressionBombError as exc:
+        raise ImageRejected("too_large") from exc
+    except Exception as exc:
+        raise ImageRejected("format") from exc
+    if img.format not in UPLOAD_FORMATS:
+        raise ImageRejected("format")
+    if img.width * img.height > MAX_PIXELS:
+        raise ImageRejected("too_large")
+    try:
+        img.load()
+    except Exception as exc:
+        raise ImageRejected("broken") from exc
+    return img
+
 
 def _whiten_background(img: Image.Image) -> Image.Image:
     """Turn the almost-white, neutral background pure white (the model leaves a faint grey/blue tint).
@@ -43,7 +76,10 @@ def _whiten_background(img: Image.Image) -> Image.Image:
 
 def finalize_card(raw: bytes, whiten: bool = False, size: Tuple[int, int] = CARD_SIZE) -> bytes:
     """Model output (PNG/JPEG bytes) -> 1080x1440 JPEG under 5 MB; `whiten` makes a neutral background pure white."""
-    img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+    img = Image.open(io.BytesIO(raw))
+    if img.width * img.height > MAX_PIXELS:
+        raise ValueError("image too large")
+    img = ImageOps.exif_transpose(img).convert("RGB")
     if img.size != size:
         img = ImageOps.fit(img, size, method=Image.LANCZOS, centering=(0.5, 0.5))
     if whiten:

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { withToken } from '../utils/session';
+import { mediaUrl, withToken } from '../utils/session';
+import { useMediaToken } from '../utils/useMediaToken';
 import { 
   ShoppingBag, 
   Store, 
@@ -34,6 +35,7 @@ import { hapticImpact, hapticNotify } from '../utils/telegram';
 import { fireConfetti } from '../utils/confetti';
 
 export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
+  useMediaToken();
   // Main state
   const [subTab, setSubTab] = useState('orders'); // 'orders' | 'stocks' | 'finance' | 'settings'
   const [selectedShopId, setSelectedShopId] = useState(0); // 0 = All shops
@@ -409,10 +411,10 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
   };
 
   // Feature 2: Download 58x40 mm thermal label PNG
-  const handleDownloadLabelPng = (orderId, postingNumber) => {
+  const handleDownloadLabelPng = async (orderId, postingNumber) => {
     hapticImpact('light');
     const a = document.createElement('a');
-    a.href = withToken(`/api/uzum/orders/${orderId}/label.png`);
+    a.href = await mediaUrl(`/api/uzum/orders/${orderId}/label.png`);
     a.download = `uzum-label-${postingNumber || orderId}.png`;
     document.body.appendChild(a);
     a.click();

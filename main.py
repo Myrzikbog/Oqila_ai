@@ -29,11 +29,14 @@ from pydantic import BaseModel, Field
 from services.ai_service import ai_service
 from services.auth_service import resolve_auth_user, verify_telegram_init_data
 from services.session_service import (
+    MEDIA_TOKEN_TTL_SECONDS,
     check_admin_key,
+    create_media_token,
     create_session_token,
     get_admin_secret_key,
     get_webhook_secret,
     new_guest_tg_id,
+    verify_media_token,
     verify_session_token,
 )
 from services.database import (
@@ -54,6 +57,7 @@ from services.database import (
     get_users_count,
     init_db,
     log_event,
+    remember_telegram_update,
     save_brand,
     save_generated_card,
     set_brand_logo,
@@ -74,7 +78,16 @@ from services.poster import PosterSpec, normalize_logo, normalize_source, poster
 from services.info_photo import InfoSpec, build_spec
 from services.poster import format_price
 from services.presets import ASPECTS, STYLES_BY_ID, default_aspect, needs_overlay, layout_for, public_registry, style_kind
-from services.rate_limit import check_user_limit, global_ai_budget_exhausted
+from services.imaging import ImageRejected
+from services.rate_limit import (
+    LimitExceeded,
+    check_user_limit,
+    finish as finish_reservation,
+    global_ai_budget_exhausted,
+    limits_status,
+    register_guest,
+    reserve,
+)
 from services.telegram_service import telegram_service
 
 from contextlib import asynccontextmanager
@@ -119,7 +132,7 @@ async def uzum_background_poller():
         except asyncio.CancelledError:
             break
         except Exception as exc:
-            logger.debug("Uzum background poller check: %s", exc)
+            logger.warning("Uzum background poller failed: %s", exc)
         await asyncio.sleep(60)
 
 
@@ -175,7 +188,7 @@ async def add_security_headers(request: Request, call_next):
     """Add standard security headers while keeping Telegram WebApp compatibility."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Referrer-Policy"] = "no-referrer"
     return response
 
 # ---------------------------------------------------------------------------
@@ -275,8 +288,7 @@ def _bearer_token(request: Request) -> Optional[str]:
     return None
 
 
-def _user_from_token(token: Optional[str]) -> dict:
-    user_id = verify_session_token(token)
+def _active_user(user_id: Optional[int]) -> dict:
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
     user = get_user(user_id)
@@ -289,13 +301,78 @@ def _user_from_token(token: Optional[str]) -> dict:
 
 def current_user(request: Request) -> dict:
     """Resolve the signed-in user from the `Authorization: Bearer <session token>` header."""
-    return _user_from_token(_bearer_token(request))
+    return _active_user(verify_session_token(_bearer_token(request)))
 
 
-def current_user_for_media(request: Request, token: Optional[str] = None) -> dict:
-    """Like current_user, but also accepts `?token=` for URLs loaded by <img>/<a> tags,
-    which cannot send an Authorization header."""
-    return _user_from_token(_bearer_token(request) or token)
+def current_user_for_media(request: Request, mt: Optional[str] = None) -> dict:
+    """For URLs loaded by <img>/<a> tags, which cannot send an Authorization header: they carry a short-lived
+    media token in `?mt=` (POST /api/media-token). The 30-day session token is never accepted in a URL:
+    URLs end up in nginx logs, browser history and Referer headers."""
+    bearer = _bearer_token(request)
+    if bearer:
+        return _active_user(verify_session_token(bearer))
+    return _active_user(verify_media_token(mt))
+
+
+def _trusted_proxies() -> set:
+    return {p.strip() for p in os.getenv("TRUSTED_PROXIES", "127.0.0.1,::1").split(",") if p.strip()}
+
+
+def client_ip(request: Request) -> str:
+    """The caller's address. X-Real-IP is only believed when the request comes from our own reverse proxy."""
+    peer = request.client.host if request.client else ""
+    if peer in _trusted_proxies():
+        real = request.headers.get("x-real-ip", "").strip()
+        if real:
+            return real[:64]
+    return peer or "unknown"
+
+
+async def run_blocking(func, *args):
+    """Run CPU-bound or blocking code (PIL, file I/O) off the event loop."""
+    return await asyncio.get_running_loop().run_in_executor(None, func, *args)
+
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_UPLOAD_ERRORS = {
+    "format": (415, {"ru": "Этот формат не поддерживается. Загрузите фото в JPG, PNG или WEBP (HEIC с iPhone пока не поддерживается).",
+                     "uz": "Bu format qo'llab-quvvatlanmaydi. JPG, PNG yoki WEBP rasm yuklang (iPhone HEIC hozircha qo'llab-quvvatlanmaydi)."}),
+    "too_large": (413, {"ru": "Слишком большое изображение: не больше 40 мегапикселей.",
+                        "uz": "Rasm juda katta: 40 megapikseldan oshmasligi kerak."}),
+    "broken": (415, {"ru": "Файл повреждён и не открывается как изображение.",
+                     "uz": "Fayl buzilgan, rasm sifatida ochilmadi."}),
+    "bytes": (413, {"ru": "Размер изображения превышает 10 МБ.", "uz": "Rasm hajmi 10 MB dan oshmasligi kerak."}),
+}
+
+
+def _upload_error(reason: str, lang: str) -> HTTPException:
+    status, text = _UPLOAD_ERRORS.get(reason, _UPLOAD_ERRORS["format"])
+    return HTTPException(status_code=status, detail=text["uz" if lang == "uz" else "ru"])
+
+
+async def read_product_photo(image: Optional[UploadFile], lang: str) -> Optional[bytes]:
+    """The uploaded product photo as a normalized JPEG (<= 2048 px), or None when no file was sent.
+
+    At most 10 MB + 1 byte is read; the type is taken from the file's magic bytes and the pixel count is checked
+    before decoding. The same normalized JPEG is stored and sent to the AI."""
+    if not image or not image.filename:
+        return None
+    raw = await image.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise _upload_error("bytes", lang)
+    if not raw:
+        return None
+    try:
+        return await run_blocking(normalize_source, raw)
+    except ImageRejected as exc:
+        raise _upload_error(exc.reason, lang)
+
+
+def take_reservation(action: str, user_id: int, lang: str) -> int:
+    try:
+        return reserve(action, user_id, lang)
+    except LimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc))
 
 
 def verify_admin_key(
@@ -322,7 +399,7 @@ def verify_admin_key(
 
 
 @app.get("/", include_in_schema=False)
-async def root():
+def root():
     """Serve the React SPA (or legacy index)."""
     from fastapi.responses import FileResponse
     react_index = FRONTEND_DIST / "index.html"
@@ -332,7 +409,7 @@ async def root():
 
 
 @app.get("/health")
-async def health():
+def health():
     """Health check endpoint."""
     return {
         "status": "healthy",
@@ -345,7 +422,7 @@ async def health():
 # User Authentication & Profile API
 # ---------------------------------------------------------------------------
 @app.post("/api/auth/login")
-async def auth_login(req: AuthLoginRequest, request: Request):
+def auth_login(req: AuthLoginRequest, request: Request):
     """Sign in and receive a session token.
 
     - Inside Telegram: identity comes only from verified initData.
@@ -371,6 +448,13 @@ async def auth_login(req: AuthLoginRequest, request: Request):
         elif os.getenv("ALLOW_GUEST_LOGIN", "1").strip().lower() in ("0", "false", "no"):
             raise HTTPException(status_code=401, detail="Please open the app from Telegram")
         else:
+            # Every new guest gets a fresh AI quota, so guests are rationed per IP (5 an hour by default)
+            if not register_guest(client_ip(request)):
+                raise HTTPException(
+                    status_code=429,
+                    detail="Слишком много новых гостевых входов с этого адреса. Откройте приложение из Telegram или попробуйте через час. / "
+                           "Bu manzildan juda ko'p mehmon kirishi. Ilovani Telegram orqali oching yoki bir soatdan keyin urinib ko'ring.",
+                )
             tg_id = new_guest_tg_id()
         resolved = resolve_auth_user(init_data=None, dev_profile=profile)
 
@@ -407,14 +491,14 @@ async def auth_login(req: AuthLoginRequest, request: Request):
 
 
 @app.get("/api/profile")
-async def get_profile(user: dict = Depends(current_user)):
+def get_profile(user: dict = Depends(current_user)):
     """Retrieve the signed-in user's profile with statistics."""
     user["is_admin"] = int(user.get("tg_id") or 0) > 0 and telegram_service.is_admin_user(user.get("tg_id"))
     return JSONResponse(content=user)
 
 
 @app.put("/api/profile")
-async def update_profile(req: UpdateProfileRequest, user: dict = Depends(current_user)):
+def update_profile(req: UpdateProfileRequest, user: dict = Depends(current_user)):
     """Update the signed-in user's business profile attributes."""
     user_id = user["user_id"]
     updated = update_user_profile(
@@ -464,155 +548,158 @@ async def generate_card(
     Returns JSON with title, description, price_tag, hashtags, marketing_tip, and studio_photo_url.
     """
     user_id = user["user_id"]
-    limit_error = check_user_limit("generate_card", user_id, lang)
-    if limit_error:
-        raise HTTPException(status_code=429, detail=limit_error)
-    use_mock = ai_service.is_mock or global_ai_budget_exhausted()
     if photoshoot_style not in STYLES_BY_ID:
         photoshoot_style = "minimal_studio"
     aspect = aspect_ratio if aspect_ratio in ASPECTS else default_aspect(photoshoot_style)
     overlay = needs_overlay(photoshoot_style)  # poster styles: the server draws the text over the picture
     kind = style_kind(photoshoot_style)
     info_text = " ".join(info_text.split("\r")).strip()[:1500]
-    image_bytes: Optional[bytes] = None
+    # A bad upload is rejected before any quota is taken
+    image_bytes = await read_product_photo(image, lang)
     image_mime = "image/jpeg"
 
-    if image and image.filename:
-        if image.content_type and not image.content_type.startswith("image/"):
-            raise HTTPException(status_code=415, detail="Only image uploads are allowed")
-        try:
-            image_bytes = await image.read()
-            image_mime = image.content_type or "image/jpeg"
-            # Validate image size (max 10MB)
-            if len(image_bytes) > 10 * 1024 * 1024:
-                raise HTTPException(
-                    status_code=413,
-                    detail="Размер изображения превышает 10 МБ / Rasm hajmi 10 MB dan oshmasligi kerak",
-                )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.warning("Could not read uploaded image: %s", exc)
-            image_bytes = None
+    reservation = take_reservation("generate_card", user_id, lang)
+    delivered = False  # True once a real AI result was produced: only then the user's quota is spent
+    try:
+        use_mock = ai_service.is_mock or global_ai_budget_exhausted()
+        logger.info(
+            "generate_card — lang=%s, has_image=%s, style=%s, custom_prompt=%s, tone=%s, format=%s, gen_photo=%s",
+            lang, image_bytes is not None, photoshoot_style, bool(photoshoot_prompt), content_tone, content_format, generate_photo,
+        )
 
-    logger.info(
-        "generate_card — lang=%s, has_image=%s, style=%s, custom_prompt=%s, tone=%s, format=%s, gen_photo=%s",
-        lang,
-        image_bytes is not None,
-        photoshoot_style,
-        bool(photoshoot_prompt),
-        content_tone,
-        content_format,
-        generate_photo,
-    )
+        result = await ai_service.generate_product_card(
+            image_bytes=image_bytes,
+            image_mime=image_mime,
+            cost_price=cost_price,
+            desired_price=desired_price,
+            note=note,
+            lang=lang,
+            photoshoot_style=photoshoot_style,
+            photoshoot_prompt=photoshoot_prompt,
+            content_tone=content_tone,
+            content_format=content_format,
+            generate_photo=generate_photo,
+            force_mock=use_mock,
+            aspect_ratio=aspect,
+            info_text=info_text,
+        )
 
-    result = await ai_service.generate_product_card(
-        image_bytes=image_bytes,
-        image_mime=image_mime,
-        cost_price=cost_price,
-        desired_price=desired_price,
-        note=note,
-        lang=lang,
-        photoshoot_style=photoshoot_style,
-        photoshoot_prompt=photoshoot_prompt,
-        content_tone=content_tone,
-        content_format=content_format,
-        generate_photo=generate_photo,
-        force_mock=use_mock,
-        aspect_ratio=aspect,
-        info_text=info_text,
-    )
+        fallback = result.get("ai_fallback")
+        if fallback and result.get("ai_fallback_scope") != "text":
+            # Sample text is not the seller's card: it is shown with a notice, but never saved to the history
+            result["id"] = None
+            result["studio_photo_url"] = None
+            log_event(
+                event_type="generate_card", lang=lang, is_mock=True,
+                details={"ai_fallback": fallback, "style": photoshoot_style, "has_image": image_bytes is not None},
+                user_id=user_id,
+            )
+            return JSONResponse(content=result)
 
-    # Posters, information cards and clean photos keep the seller's own photo (fallback background, re-generation)
-    source_ref: Optional[str] = None
-    poster_config: Optional[dict] = None
-    info_config: Optional[dict] = None
-    if overlay or kind in ("ai_text", "clean"):
-        if image_bytes:
-            try:
-                source_ref = store_bytes("source", normalize_source(image_bytes), "jpg")
-            except ValueError:
-                source_ref = None
-    if kind == "ai_text":
-        info_config = result.get("info")
-        if not info_config:  # offline mode: no AI card, only the seller's own facts and the card's text
-            defaults = poster_defaults(result, None, lang)
-            spec = build_spec({"benefits": defaults["bullets"]}, info_text, defaults["title"], lang, allowed_text=note)
-            info_config = {**spec.to_dict(), "verified": None, "missing": [], "unexpected": [], "attempts": 0}
-            result["info"] = info_config
-        brand = get_brand(user_id)
-        poster_config = _info_poster_config(info_config, brand, desired_price, lang)
-        result["poster"] = poster_config
-        result["poster_has_scene"] = False
-        result["poster_url"] = None  # set below once the card id is known
-        result["display"] = "photo" if result.get("studio_photo_url") else "poster"
-    elif overlay:
-        brand = get_brand(user_id)
-        poster_config = PosterSpec.from_dict({
-            "layout": layout_for(photoshoot_style),
-            "aspect": aspect,
-            "palette": "custom" if brand["brand_color"] else "brand",
-            "brand_color": brand["brand_color"],
-            "lang": lang,
-            "contact": brand["brand_contact"],
-            "brand_name": brand["brand_name"],
-            "show_logo": bool(brand["brand_logo"]),
-            **poster_defaults(result, desired_price, lang),
-        }).to_dict()
-        result["display"] = "poster"
+        # Posters, information cards and clean photos keep the seller's own photo (fallback background, re-generation)
+        source_ref: Optional[str] = None
+        poster_config: Optional[dict] = None
+        info_config: Optional[dict] = None
+        if (overlay or kind in ("ai_text", "clean")) and image_bytes:
+            source_ref = await run_blocking(store_bytes, "source", image_bytes, "jpg")
+        if kind == "ai_text":
+            info_config = result.get("info")
+            if not info_config:
+                defaults = poster_defaults(result, None, lang)
+                spec = build_spec({"benefits": defaults["bullets"]}, info_text, defaults["title"], lang, allowed_text=note)
+                info_config = {**spec.to_dict(), "verified": None, "missing": [], "unexpected": [], "attempts": 0}
+                result["info"] = info_config
+            brand = get_brand(user_id)
+            poster_config = _info_poster_config(info_config, brand, desired_price, lang)
+            result["poster"] = poster_config
+            result["poster_has_scene"] = False
+            result["poster_url"] = None  # set below once the card id is known
+            result["display"] = "photo" if result.get("studio_photo_url") else "poster"
+        elif overlay:
+            brand = get_brand(user_id)
+            poster_config = PosterSpec.from_dict({
+                "layout": layout_for(photoshoot_style),
+                "aspect": aspect,
+                "palette": "custom" if brand["brand_color"] else "brand",
+                "brand_color": brand["brand_color"],
+                "lang": lang,
+                "contact": brand["brand_contact"],
+                "brand_name": brand["brand_name"],
+                "show_logo": bool(brand["brand_logo"]),
+                **poster_defaults(result, desired_price, lang),
+            }).to_dict()
+            result["display"] = "poster"
 
-    # Save to history database
-    card_id = save_generated_card(
-        title=result.get("title", ""),
-        description=result.get("description", ""),
-        price_tag=result.get("price_tag", ""),
-        hashtags=result.get("hashtags", []),
-        marketing_tip=result.get("marketing_tip", ""),
-        studio_photo_url=result.get("studio_photo_url"),
-        photoshoot_style=photoshoot_style,
-        content_tone=content_tone,
-        content_format=content_format,
-        cost_price=cost_price,
-        desired_price=desired_price,
-        note=note,
-        lang=lang,
-        user_id=user_id,
-        source_photo_url=source_ref,
-        poster_config=poster_config,
-        info_config=info_config,
-    )
-    result["id"] = card_id
-    if kind == "ai_text" and poster_config:
-        result["poster_url"] = f"/api/cards/{card_id}/poster.png"
-    elif poster_config:
-        # The picture is drawn on demand from the config: no need to ship the raw AI scene to the client
-        result["poster_has_scene"] = bool(result.get("studio_photo_url"))
-        result["studio_photo_url"] = None
-        result["poster"] = poster_config
-        result["poster_url"] = f"/api/cards/{card_id}/poster.png"
+        # Save to history database
+        card_id = await run_blocking(lambda: save_generated_card(
+            title=result.get("title", ""),
+            description=result.get("description", ""),
+            price_tag=result.get("price_tag", ""),
+            hashtags=result.get("hashtags", []),
+            marketing_tip=result.get("marketing_tip", ""),
+            studio_photo_url=result.get("studio_photo_url"),
+            photoshoot_style=photoshoot_style,
+            content_tone=content_tone,
+            content_format=content_format,
+            cost_price=cost_price,
+            desired_price=desired_price,
+            note=note,
+            lang=lang,
+            user_id=user_id,
+            source_photo_url=source_ref,
+            poster_config=poster_config,
+            info_config=info_config,
+        ))
+        if not card_id:
+            delete_photo(source_ref)
+            raise HTTPException(status_code=500, detail="Could not save the card. Please try again.")
+        delivered = True
+        result["id"] = card_id
+        if kind == "ai_text" and poster_config:
+            result["poster_url"] = f"/api/cards/{card_id}/poster.png"
+        elif poster_config:
+            # The picture is drawn on demand from the config: no need to ship the raw AI scene to the client
+            result["poster_has_scene"] = bool(result.get("studio_photo_url"))
+            result["studio_photo_url"] = None
+            result["poster"] = poster_config
+            result["poster_url"] = f"/api/cards/{card_id}/poster.png"
 
-    log_event(
-        event_type="generate_card",
-        lang=lang,
-        is_mock=use_mock,
-        details={
-            "card_id": card_id,
-            "title": result.get("title", ""),
-            "has_image": image_bytes is not None,
-            "style": photoshoot_style,
-            "aspect": aspect,
-            "tone": content_tone,
-            "format": content_format,
-            "has_studio_photo": bool(result.get("studio_photo_url")),
-        },
-        user_id=user_id,
-    )
+        log_event(
+            event_type="generate_card",
+            lang=lang,
+            is_mock=False,
+            details={
+                "card_id": card_id,
+                "title": result.get("title", ""),
+                "has_image": image_bytes is not None,
+                "style": photoshoot_style,
+                "aspect": aspect,
+                "tone": content_tone,
+                "format": content_format,
+                "has_studio_photo": bool(result.get("studio_photo_url")),
+            },
+            user_id=user_id,
+        )
 
-    return JSONResponse(content=result)
+        return JSONResponse(content=result)
+    finally:
+        finish_reservation(reservation, delivered)
+
+
+@app.get("/api/limits")
+def get_limits(user: dict = Depends(current_user)):
+    """The user's AI quota: how many card generations and legal questions are used and when a slot frees up."""
+    return limits_status(user["user_id"])
+
+
+@app.post("/api/media-token")
+def issue_media_token(user: dict = Depends(current_user)):
+    """A 10-minute token for picture and download URLs (`?mt=`), so the session token never appears in a URL."""
+    return {"media_token": create_media_token(user["user_id"]), "expires_in": MEDIA_TOKEN_TTL_SECONDS}
 
 
 @app.get("/api/demo-card")
-async def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
+def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
     """
     Return a pre-built demo product card (no image processing, no Gemini call).
     Used for the «✨ Быстрое демо» button: instant and works offline on stage.
@@ -620,15 +707,8 @@ async def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
     limit_error = check_user_limit("demo_card", user["user_id"], lang)
     if limit_error:
         raise HTTPException(status_code=429, detail=limit_error)
-    result = await ai_service.generate_product_card(
-        force_mock=True,
-        image_bytes=None,
-        image_mime="image/jpeg",
-        cost_price=120_000,
-        desired_price=380_000,
-        note="Национальный атласный халат/ko'ylak, ручная вышивка",
-        lang=lang,
-    )
+    result = ai_service.demo_card(lang, desired_price=380_000, note="Национальный атласный халат/ko'ylak, ручная вышивка")
+    result["is_demo"] = True
 
     card_id = save_generated_card(
         title=result.get("title", ""),
@@ -661,7 +741,7 @@ async def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
 
 
 @app.get("/api/photoshoot-presets")
-async def get_photoshoot_presets():
+def get_photoshoot_presets():
     """Registry of everything the studio can produce: output types, styles, layouts, aspect ratios, palettes."""
     from services.ai_service import TONE_PRESETS, FORMAT_PRESETS
     registry = public_registry()
@@ -674,7 +754,7 @@ async def get_photoshoot_presets():
 # History & Catalog API
 # ---------------------------------------------------------------------------
 @app.get("/api/history")
-async def get_cards_history(
+def get_cards_history(
     limit: int = 50,
     offset: int = 0,
     favorites_only: bool = False,
@@ -701,7 +781,7 @@ async def get_cards_history(
 
 
 @app.post("/api/history/{card_id}/favorite")
-async def toggle_card_favorite(card_id: int, user: dict = Depends(current_user)):
+def toggle_card_favorite(card_id: int, user: dict = Depends(current_user)):
     """Toggle star/favorite flag on one of the user's cards."""
     new_status = toggle_favorite(card_id, user_id=user["user_id"])
     if new_status is None:
@@ -710,7 +790,7 @@ async def toggle_card_favorite(card_id: int, user: dict = Depends(current_user))
 
 
 @app.delete("/api/history/{card_id}")
-async def delete_card_history_item(card_id: int, user: dict = Depends(current_user)):
+def delete_card_history_item(card_id: int, user: dict = Depends(current_user)):
     """Delete one of the user's cards from history."""
     success = delete_history_item(card_id, user_id=user["user_id"])
     if not success:
@@ -761,7 +841,7 @@ def _card_photo_response(card_id: int, owner_id: Optional[int]) -> Response:
 
 
 @app.get("/api/cards/{card_id}/photo")
-async def get_card_photo(card_id: int, user: dict = Depends(current_user_for_media)):
+def get_card_photo(card_id: int, user: dict = Depends(current_user_for_media)):
     """Serve the studio photo of one of the user's cards."""
     return _card_photo_response(card_id, owner_id=user["user_id"])
 
@@ -898,9 +978,6 @@ async def regenerate_info_photo(card_id: int, req: InfoRequest, user: dict = Dep
     if style_kind(style) != "ai_text":
         raise HTTPException(status_code=400, detail="This card is not an information card")
     lang = req.lang or card.get("lang") or "ru"
-    limit_error = check_user_limit("generate_card", user["user_id"], lang)
-    if limit_error:
-        raise HTTPException(status_code=429, detail=limit_error)
     if ai_service.is_mock or global_ai_budget_exhausted():
         raise HTTPException(status_code=503, detail="AI is not available right now. Use the exact-text version.")
     source = resolve_photo(card.get("source_photo_url"))
@@ -908,13 +985,24 @@ async def regenerate_info_photo(card_id: int, req: InfoRequest, user: dict = Dep
         raise HTTPException(status_code=409, detail="The original photo of this card is no longer stored")
 
     spec = InfoSpec.from_dict({**req.model_dump(exclude_none=True), "specs": [s.model_dump() for s in (req.specs or [])], "lang": lang})
-    info = await ai_service.generate_info_photo(source.read_bytes(), "image/jpeg", style, spec)
-    if not info["photo_url"]:
-        raise HTTPException(status_code=502, detail="The picture could not be generated. Try again.")
-    photo_url = info.pop("photo_url")
-    config = {**spec.to_dict(), **info}
-    poster_cfg = _info_poster_config(config, get_brand(user["user_id"]), card.get("desired_price"), lang)
-    old_photo = update_card_info(card_id, user["user_id"], photo_url, config, poster_cfg, style)
+    reservation = take_reservation("generate_card", user["user_id"], lang)
+    delivered = False
+    try:
+        info = await ai_service.generate_info_photo(await run_blocking(source.read_bytes), "image/jpeg", style, spec)
+        if not info["photo_url"]:
+            raise HTTPException(status_code=502, detail="The picture could not be generated. Try again.")
+        photo_url = info.pop("photo_url")
+        config = {**spec.to_dict(), **info}
+        poster_cfg = _info_poster_config(config, get_brand(user["user_id"]), card.get("desired_price"), lang)
+        try:
+            old_photo = await run_blocking(update_card_info, card_id, user["user_id"], photo_url, config, poster_cfg, style)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Card not found")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Could not save the card. Please try again.")
+        delivered = True
+    finally:
+        finish_reservation(reservation, delivered)
     if old_photo:
         delete_photo(old_photo)
     log_event(event_type="generate_card", lang=lang, is_mock=False, details={"card_id": card_id, "style": style, "regenerated": True}, user_id=user["user_id"])
@@ -928,13 +1016,13 @@ def _brand_response(user_id: int) -> dict:
 
 
 @app.get("/api/brand")
-async def get_brand_endpoint(user: dict = Depends(current_user)):
+def get_brand_endpoint(user: dict = Depends(current_user)):
     """The seller's branding: shop name, brand colour, contacts, logo flag."""
     return _brand_response(user["user_id"])
 
 
 @app.put("/api/brand")
-async def save_brand_endpoint(req: BrandRequest, user: dict = Depends(current_user)):
+def save_brand_endpoint(req: BrandRequest, user: dict = Depends(current_user)):
     import re
 
     color = req.brand_color.strip()
@@ -951,7 +1039,7 @@ async def upload_brand_logo(logo: UploadFile = File(...), user: dict = Depends(c
     if len(raw) > 2 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Logo must be 2 MB or smaller")
     try:
-        png = normalize_logo(raw)
+        png = await run_blocking(normalize_logo, raw)
     except ValueError:
         raise HTTPException(status_code=415, detail="Upload a PNG, JPG or WEBP image")
     old = set_brand_logo(user["user_id"], store_bytes("brand", png, "png"))
@@ -960,13 +1048,13 @@ async def upload_brand_logo(logo: UploadFile = File(...), user: dict = Depends(c
 
 
 @app.delete("/api/brand/logo")
-async def delete_brand_logo(user: dict = Depends(current_user)):
+def delete_brand_logo(user: dict = Depends(current_user)):
     delete_photo(set_brand_logo(user["user_id"], None))
     return _brand_response(user["user_id"])
 
 
 @app.get("/api/brand/logo.png")
-async def get_brand_logo(user: dict = Depends(current_user_for_media)):
+def get_brand_logo(user: dict = Depends(current_user_for_media)):
     from fastapi.responses import FileResponse
 
     path = resolve_photo(get_brand(user["user_id"])["brand_logo"])
@@ -976,7 +1064,7 @@ async def get_brand_logo(user: dict = Depends(current_user_for_media)):
 
 
 @app.delete("/api/history")
-async def clear_all_cards_history(user: dict = Depends(current_user)):
+def clear_all_cards_history(user: dict = Depends(current_user)):
     """Clear the signed-in user's card history (other users are untouched)."""
     clear_history(user_id=user["user_id"])
     return {"status": "ok"}
@@ -1044,7 +1132,7 @@ async def get_cbu_exchange_rate():
 # Tab 2: Calculator & Soliq
 # ---------------------------------------------------------------------------
 @app.get("/api/finance-meta")
-async def get_finance_meta():
+def get_finance_meta():
     """Return BRV, Uzum categories and tax rates for the frontend."""
     from services.legal_calc import (
         BRV_UZS,
@@ -1067,7 +1155,7 @@ async def get_finance_meta():
 
 
 @app.post("/api/calculate")
-async def calculate_profit(req: CalcRequest):
+def calculate_profit(req: CalcRequest):
     """
     Calculate profit, margin, taxes and pricing recommendations across sales channels.
     """
@@ -1163,7 +1251,7 @@ async def calculate_profit(req: CalcRequest):
 # Tab 3: Legal Guide
 # ---------------------------------------------------------------------------
 @app.get("/api/legal-steps")
-async def legal_steps(lang: str = "ru"):
+def legal_steps(lang: str = "ru"):
     """Return step-by-step legal guide for business registration in Uzbekistan."""
     steps = LEGAL_STEPS_UZ if lang == "uz" else LEGAL_STEPS_RU
     return JSONResponse(content={"steps": steps})
@@ -1177,29 +1265,32 @@ async def legal_qa(req: LegalQARequest, user: dict = Depends(current_user)):
     if len(req.question) > 4000:
         raise HTTPException(status_code=413, detail="Question too long")
 
-    limit_error = check_user_limit("legal_qa", user["user_id"], req.lang)
-    if limit_error:
-        raise HTTPException(status_code=429, detail=limit_error)
-    use_mock = ai_service.is_mock or global_ai_budget_exhausted()
-    answer = await ai_service.legal_qa(
-        question=req.question,
-        lang=req.lang,
-        user_profile=req.user_profile,
-        force_mock=use_mock,
-    )
+    reservation = take_reservation("legal_qa", user["user_id"], req.lang)
+    reason: Optional[str] = "error"
+    try:
+        use_mock = ai_service.is_mock or global_ai_budget_exhausted()
+        answer, reason = await ai_service.legal_qa(
+            question=req.question,
+            lang=req.lang,
+            user_profile=req.user_profile,
+            force_mock=use_mock,
+        )
+    finally:
+        finish_reservation(reservation, reason is None)
 
     log_event(
         event_type="legal_qa",
         lang=req.lang,
-        is_mock=use_mock,
+        is_mock=reason is not None,  # what actually happened, not what was planned
         details={
             "question": req.question[:120],
             "has_profile": req.user_profile is not None,
+            "ai_fallback": reason,
         },
         user_id=user["user_id"],
     )
 
-    return JSONResponse(content={"answer": answer})
+    return JSONResponse(content={"answer": answer, "ai_fallback": reason})
 
 
 # ---------------------------------------------------------------------------
@@ -1217,7 +1308,7 @@ def _own_telegram_chat_id(user: dict) -> int:
 
 
 @app.get("/api/uzum/settings")
-async def get_uzum_settings_endpoint(user: dict = Depends(current_user)):
+def get_uzum_settings_endpoint(user: dict = Depends(current_user)):
     """Retrieve the user's Uzum API connection settings (the API key is returned masked only)."""
     from services.database import get_uzum_settings
     return JSONResponse(content=get_uzum_settings(user["user_id"]))
@@ -1240,7 +1331,7 @@ async def save_uzum_settings_endpoint(req: UzumSettingsRequest, user: dict = Dep
 
 
 @app.delete("/api/uzum/settings")
-async def disconnect_uzum_endpoint(user: dict = Depends(current_user)):
+def disconnect_uzum_endpoint(user: dict = Depends(current_user)):
     """Disconnect the user's Uzum account and clear their cached Uzum data."""
     from services.database import disconnect_uzum
     disconnect_uzum(user["user_id"])
@@ -1248,7 +1339,7 @@ async def disconnect_uzum_endpoint(user: dict = Depends(current_user)):
 
 
 @app.get("/api/uzum/shops")
-async def get_uzum_shops_endpoint(user: dict = Depends(current_user)):
+def get_uzum_shops_endpoint(user: dict = Depends(current_user)):
     """Get all shops belonging to the user's seller account."""
     from services.database import get_uzum_shops
     shops = get_uzum_shops(user["user_id"])
@@ -1256,7 +1347,7 @@ async def get_uzum_shops_endpoint(user: dict = Depends(current_user)):
 
 
 @app.get("/api/uzum/orders")
-async def get_uzum_orders_endpoint(
+def get_uzum_orders_endpoint(
     shop_id: Optional[int] = None,
     status: Optional[str] = None,
     limit: int = 50,
@@ -1304,7 +1395,7 @@ async def get_uzum_order_label(order_id: int, size: str = "LARGE", user: dict = 
 
 
 @app.get("/api/uzum/orders/{order_id}/label.png")
-async def get_uzum_order_label_png(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
+def get_uzum_order_label_png(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
     """Return shipping label as a 203 DPI monochrome PNG image (58x40 or 43x25 mm)."""
     from services.uzum_service import uzum_service
     png_bytes = uzum_service.generate_thermal_label_image(user["user_id"], order_id, size=size)
@@ -1314,7 +1405,7 @@ async def get_uzum_order_label_png(order_id: int, size: str = "LARGE", user: dic
 
 
 @app.get("/api/uzum/orders/{order_id}/label.svg")
-async def get_uzum_order_label_svg(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
+def get_uzum_order_label_svg(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
     """Return shipping label as a pure vector SVG (58x40 or 43x25 mm)."""
     from services.uzum_service import uzum_service
     svg_content = uzum_service.generate_thermal_label_svg(user["user_id"], order_id, size=size)
@@ -1324,7 +1415,7 @@ async def get_uzum_order_label_svg(order_id: int, size: str = "LARGE", user: dic
 
 
 @app.get("/api/uzum/stocks")
-async def get_uzum_stocks_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
+def get_uzum_stocks_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
     """Retrieve the user's SKU stocks and low-stock indicators."""
     from services.database import get_uzum_stocks
     stocks = get_uzum_stocks(user["user_id"], shop_id=shop_id)
@@ -1332,7 +1423,7 @@ async def get_uzum_stocks_endpoint(shop_id: Optional[int] = None, user: dict = D
 
 
 @app.post("/api/uzum/stocks/update")
-async def update_uzum_stock_endpoint(req: UzumUpdateStockRequest, user: dict = Depends(current_user)):
+def update_uzum_stock_endpoint(req: UzumUpdateStockRequest, user: dict = Depends(current_user)):
     """Update stock quantity for one of the user's SKUs."""
     from services.database import update_uzum_stock_amount
     if req.amount < 0:
@@ -1344,7 +1435,7 @@ async def update_uzum_stock_endpoint(req: UzumUpdateStockRequest, user: dict = D
 
 
 @app.post("/api/uzum/prices/update")
-async def update_uzum_price_endpoint(req: UzumUpdatePriceRequest, user: dict = Depends(current_user)):
+def update_uzum_price_endpoint(req: UzumUpdatePriceRequest, user: dict = Depends(current_user)):
     """Update selling price for one of the user's SKUs."""
     from services.database import update_uzum_price
     if req.price < 0:
@@ -1356,7 +1447,7 @@ async def update_uzum_price_endpoint(req: UzumUpdatePriceRequest, user: dict = D
 
 
 @app.post("/api/uzum/stocks/cost-price")
-async def update_uzum_cost_price_endpoint(req: UzumUpdateCostPriceRequest, user: dict = Depends(current_user)):
+def update_uzum_cost_price_endpoint(req: UzumUpdateCostPriceRequest, user: dict = Depends(current_user)):
     """Update cost price (tannarxi / себестоимость) for one of the user's SKUs."""
     from services.database import update_uzum_cost_price
     if req.cost_price < 0:
@@ -1368,14 +1459,14 @@ async def update_uzum_cost_price_endpoint(req: UzumUpdateCostPriceRequest, user:
 
 
 @app.get("/api/uzum/margin-guard")
-async def get_uzum_margin_guard_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
+def get_uzum_margin_guard_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
     """Retrieve SKU-level unit economics and margin guard analytics."""
     from services.database import get_uzum_margin_analytics
     return JSONResponse(content=get_uzum_margin_analytics(user["user_id"], shop_id=shop_id))
 
 
 @app.get("/api/uzum/finance")
-async def get_uzum_finance_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
+def get_uzum_finance_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
     """Retrieve financial summary (gross, commission, logistics, tax 1%, net payout)."""
     from services.database import get_uzum_finance_summary
     return JSONResponse(content=get_uzum_finance_summary(user["user_id"], shop_id=shop_id))
@@ -1402,7 +1493,7 @@ async def test_uzum_push_endpoint(req: UzumTestPushRequest, user: dict = Depends
 
 
 @app.get("/api/uzum/fbo/forecast")
-async def get_uzum_fbo_forecast_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
+def get_uzum_fbo_forecast_endpoint(shop_id: Optional[int] = None, user: dict = Depends(current_user)):
     """Retrieve FBO inventory days left forecast and stockout warnings."""
     from services.database import get_uzum_fbo_forecast
     data = get_uzum_fbo_forecast(user["user_id"], shop_id=shop_id)
@@ -1424,7 +1515,7 @@ async def test_uzum_fbo_alert_endpoint(req: UzumFboAlertRequest, user: dict = De
 # Analytics & Stats (SQLite)
 # ---------------------------------------------------------------------------
 @app.get("/api/stats")
-async def get_analytics():
+def get_analytics():
     """Public aggregate statistics (counts only) for the /stage presentation page."""
     stats = get_stats()
     stats["bot_username"] = os.getenv("TELEGRAM_BOT_USERNAME", "oqila_ai_bot").strip().lstrip("@") or "oqila_ai_bot"
@@ -1436,14 +1527,14 @@ async def get_analytics():
 # Admin Panel API Endpoints (Protected by X-Admin-Key or admin_key query)
 # ---------------------------------------------------------------------------
 @app.get("/api/admin/dashboard")
-async def admin_dashboard(admin_auth: bool = Security(verify_admin_key)):
+def admin_dashboard(admin_auth: bool = Security(verify_admin_key)):
     """Retrieve high-level dashboard metrics for the administrator."""
     metrics = get_admin_dashboard_metrics()
     return JSONResponse(content=metrics)
 
 
 @app.get("/api/admin/users")
-async def admin_get_users(
+def admin_get_users(
     limit: int = 50,
     offset: int = 0,
     search: str = "",
@@ -1458,7 +1549,7 @@ async def admin_get_users(
 
 
 @app.get("/api/admin/users/{user_id}")
-async def admin_get_user_details(user_id: int, admin_auth: bool = Security(verify_admin_key)):
+def admin_get_user_details(user_id: int, admin_auth: bool = Security(verify_admin_key)):
     """Retrieve detailed profile, cards, and events for a specific user."""
     user = get_user(user_id)
     if not user:
@@ -1469,7 +1560,7 @@ async def admin_get_user_details(user_id: int, admin_auth: bool = Security(verif
 
 
 @app.post("/api/admin/users/{user_id}/toggle-active")
-async def admin_toggle_user_active(user_id: int, admin_auth: bool = Security(verify_admin_key)):
+def admin_toggle_user_active(user_id: int, admin_auth: bool = Security(verify_admin_key)):
     """Toggle user active status (enable/disable account)."""
     new_status = toggle_user_active(user_id)
     if new_status is None:
@@ -1477,8 +1568,26 @@ async def admin_toggle_user_active(user_id: int, admin_auth: bool = Security(ver
     return JSONResponse(content={"status": "ok", "user_id": user_id, "is_active": new_status})
 
 
+@app.post("/api/admin/users/{user_id}/toggle-admin")
+def admin_toggle_user_admin(user_id: int, admin_auth: bool = Security(verify_admin_key)):
+    """Grant or revoke administrator rights of a Telegram user (the only way to set the flag by hand)."""
+    from services.database import set_user_admin
+
+    target = get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    tg_id = int(target.get("tg_id") or 0)
+    if tg_id <= 0:
+        raise HTTPException(status_code=400, detail="Browser guests cannot be administrators")
+    new_state = not bool(target.get("is_admin"))
+    if not set_user_admin(tg_id, new_state):
+        raise HTTPException(status_code=500, detail="Could not update the user")
+    telegram_service.forget_admin_cache(tg_id)
+    return {"status": "ok", "user_id": user_id, "is_admin": new_state}
+
+
 @app.get("/api/admin/events")
-async def admin_get_events(
+def admin_get_events(
     user_id: Optional[int] = None,
     event_type: str = "",
     limit: int = 100,
@@ -1492,7 +1601,7 @@ async def admin_get_events(
 
 
 @app.get("/api/admin/cards")
-async def admin_get_cards(
+def admin_get_cards(
     user_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
@@ -1504,13 +1613,13 @@ async def admin_get_cards(
 
 
 @app.get("/api/admin/cards/{card_id}/photo")
-async def admin_get_card_photo(card_id: int, admin_auth: bool = Security(verify_admin_key)):
+def admin_get_card_photo(card_id: int, admin_auth: bool = Security(verify_admin_key)):
     """Serve any card's studio photo to administrators."""
     return _card_photo_response(card_id, owner_id=None)
 
 
 @app.get("/api/admin/export/users.csv")
-async def admin_export_users_csv(admin_auth: bool = Security(verify_admin_key)):
+def admin_export_users_csv(admin_auth: bool = Security(verify_admin_key)):
     """Export all users data as a beautiful, Excel-compatible CSV with UTF-8 BOM."""
     from services.csv_service import generate_users_csv
 
@@ -1525,7 +1634,7 @@ async def admin_export_users_csv(admin_auth: bool = Security(verify_admin_key)):
 
 
 @app.get("/api/admin/export/cards.csv")
-async def admin_export_cards_csv(admin_auth: bool = Security(verify_admin_key)):
+def admin_export_cards_csv(admin_auth: bool = Security(verify_admin_key)):
     """Export all generated cards data as a beautiful, Excel-compatible CSV."""
     from services.csv_service import generate_cards_csv
 
@@ -1542,6 +1651,9 @@ async def admin_export_cards_csv(admin_auth: bool = Security(verify_admin_key)):
 # ---------------------------------------------------------------------------
 # Telegram Bot Webhook Endpoints
 # ---------------------------------------------------------------------------
+_webhook_tasks: set = set()  # strong references: the loop only keeps weak ones to running tasks
+
+
 @app.post("/api/telegram-webhook")
 async def telegram_webhook(request: Request):
     """Handle incoming Telegram webhook updates."""
@@ -1557,12 +1669,30 @@ async def telegram_webhook(request: Request):
 
     try:
         update = await request.json()
-        host_url = str(request.base_url).rstrip("/")
-        if request.headers.get("x-forwarded-proto") == "https":
-            host_url = host_url.replace("http://", "https://")
-        await telegram_service.handle_update(update, default_app_url=host_url)
-    except Exception as exc:
-        logger.error("Error processing telegram update: %s", exc)
+    except Exception:
+        return {"ok": True}
+    if not isinstance(update, dict):
+        return {"ok": True}
+    host_url = str(request.base_url).rstrip("/")
+    if request.headers.get("x-forwarded-proto") == "https":
+        host_url = host_url.replace("http://", "https://")
+
+    # Telegram re-sends an update when the answer is slow (an AI call takes longer than its timeout), which
+    # used to run the same generation several times. So: remember the update id, answer 200 at once and
+    # do the work in the background.
+    update_id = update.get("update_id")
+    if isinstance(update_id, int) and not remember_telegram_update(update_id):
+        return {"ok": True, "duplicate": True}
+
+    async def process() -> None:
+        try:
+            await telegram_service.handle_update(update, default_app_url=host_url)
+        except Exception as exc:
+            logger.error("Error processing telegram update: %s", exc)
+
+    task = asyncio.create_task(process())
+    _webhook_tasks.add(task)
+    task.add_done_callback(_webhook_tasks.discard)
     return {"ok": True}
 
 
@@ -1599,7 +1729,7 @@ async def get_webhook_status(admin_auth: bool = Security(verify_admin_key)):
 # SPA Catch-all Route
 # ---------------------------------------------------------------------------
 @app.get("/{full_path:path}", include_in_schema=False)
-async def catch_all(full_path: str):
+def catch_all(full_path: str):
     """Serve SPA index for deep links or static assets from dist."""
     from fastapi.responses import FileResponse
     # Do not intercept API, health, static or assets

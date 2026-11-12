@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { hapticImpact, hapticNotify, openTelegramShare } from '../utils/telegram';
 import { fireConfetti } from '../utils/confetti';
+import { mediaUrl, withToken } from '../utils/session';
+import { useMediaToken } from '../utils/useMediaToken';
 import { OutputTypePicker, StylePicker } from './studio/StylePicker';
 import PosterEditor from './studio/PosterEditor';
 import InfoCardView from './studio/InfoCardView';
@@ -54,6 +56,7 @@ const FALLBACK_REGISTRY = {
 let registryCache = null;
 
 export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, userId }) {
+  useMediaToken();
   // Form State
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -341,11 +344,11 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     setTimeout(() => setCopiedTag(null), 1500);
   };
 
-  const downloadStudioPhoto = () => {
+  const downloadStudioPhoto = async () => {
     if (!result?.studio_photo_url) return;
     hapticImpact('light');
     const link = document.createElement('a');
-    link.href = result.studio_photo_url;
+    link.href = await mediaUrl(result.studio_photo_url);
     link.download = `oqila_studio_${Date.now()}.jpg`;
     document.body.appendChild(link);
     link.click();
@@ -862,7 +865,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
           {result.ai_fallback && (
             <p role="alert" className="flex gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-xs font-semibold text-amber-900 dark:text-amber-200">
               <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-              <span>{result.ai_fallback === 'quota' ? sl.ai_fallback_quota : sl.ai_fallback_error}</span>
+              <span>{result.ai_fallback_scope === 'text' ? sl.ai_fallback_text : `${result.ai_fallback === 'error' ? sl.ai_fallback_error : sl.ai_fallback_quota} ${sl.ai_fallback_not_saved}`}</span>
             </p>
           )}
           {result.info && result.studio_photo_url && result.display !== 'poster' ? (
@@ -918,8 +921,8 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                 <img
                   src={
                     activePhotoView === 'studio' && result.studio_photo_url
-                      ? result.studio_photo_url
-                      : (imagePreview || result.studio_photo_url)
+                      ? withToken(result.studio_photo_url)
+                      : (imagePreview || withToken(result.studio_photo_url))
                   }
                   alt={result.title}
                   className="w-full aspect-square object-cover"

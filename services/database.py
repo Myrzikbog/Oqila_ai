@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from services import secret_box
 from services.media_storage import delete_photo, is_served_photo, store_photo
 
 logger = logging.getLogger("oqila_db")
@@ -20,12 +21,36 @@ logger = logging.getLogger("oqila_db")
 DB_PATH = Path(os.getenv("OQILA_DB_PATH") or (Path(__file__).parent.parent / "oqila_ai.db"))
 
 
+class ClosingConnection(sqlite3.Connection):
+    """sqlite3's own `with conn:` only commits or rolls back and leaves the connection open (one leaked file
+    handle per request). This one also closes it, so `with get_db_connection() as conn:` is a complete lifecycle."""
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
+_wal_enabled_for: Optional[str] = None
+
+
 def get_db_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), timeout=15.0, check_same_thread=False)
+    """A new connection that closes itself at the end of a `with` block (or use contextlib.closing)."""
+    global _wal_enabled_for
+    conn = sqlite3.connect(str(DB_PATH), timeout=15.0, check_same_thread=False, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
+    if _wal_enabled_for != str(DB_PATH):  # WAL is stored in the database file: once per process is enough
+        conn.execute("PRAGMA journal_mode=WAL;")
+        _wal_enabled_for = str(DB_PATH)
     conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
+
+
+def like_pattern(text: str) -> str:
+    """`%text%` for a LIKE ... ESCAPE '\\' clause, with the user's own %, _ and \\ taken literally."""
+    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 _db_initialized = False
@@ -265,6 +290,36 @@ def init_db(force: bool = False) -> None:
                 )
             """)
 
+            # AI quota: one row per user request (pending -> ok/failed) and one row per real Gemini call
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_reservations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ai_reservations_user ON ai_reservations(user_id, event_type, created_at)"
+            )
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ai_calls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    model TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_calls_created ON ai_calls(created_at)")
+            # Telegram retries a webhook delivery it considers failed: remember handled update ids
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_updates (
+                    update_id INTEGER PRIMARY KEY,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_event_type ON usage_logs(event_type);
             """)
@@ -298,6 +353,18 @@ def init_db(force: bool = False) -> None:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_logs_user_id ON usage_logs(user_id);
             """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_logs_user_event ON usage_logs(user_id, event_type, created_at)"
+            )
+            # Uzum API keys are stored encrypted: encrypt the ones saved before encryption existed
+            for row in cursor.execute(
+                "SELECT user_id, api_key FROM uzum_settings WHERE api_key IS NOT NULL AND api_key != ''"
+            ).fetchall():
+                if not secret_box.is_encrypted(row["api_key"]):
+                    cursor.execute(
+                        "UPDATE uzum_settings SET api_key = ? WHERE user_id = ?",
+                        (secret_box.encrypt(row["api_key"]), row["user_id"]),
+                    )
             conn.commit()
             _db_initialized = True
             logger.info("SQLite database initialized at %s", DB_PATH)
@@ -516,8 +583,8 @@ def get_history(
             if favorites_only:
                 query += " AND is_favorite = 1"
             if search.strip():
-                query += " AND (title LIKE ? OR description LIKE ? OR note LIKE ? OR hashtags LIKE ?)"
-                kw = f"%{search.strip()}%"
+                query += " AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\' OR hashtags LIKE ? ESCAPE '\\')"
+                kw = like_pattern(search.strip())
                 params.extend([kw, kw, kw, kw])
             
             query += " ORDER BY is_favorite DESC, id DESC LIMIT ? OFFSET ?"
@@ -572,8 +639,8 @@ def get_history_count(favorites_only: bool = False, search: str = "", user_id: O
             if favorites_only:
                 query += " AND is_favorite = 1"
             if search.strip():
-                query += " AND (title LIKE ? OR description LIKE ? OR note LIKE ? OR hashtags LIKE ?)"
-                kw = f"%{search.strip()}%"
+                query += " AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\' OR hashtags LIKE ? ESCAPE '\\')"
+                kw = like_pattern(search.strip())
                 params.extend([kw, kw, kw, kw])
             cursor.execute(query, tuple(params))
             row = cursor.fetchone()
@@ -657,7 +724,8 @@ def get_subscribers() -> List[Dict[str, Any]]:
 
 
 def delete_history_item(card_id: int, user_id: int) -> bool:
-    """Delete one of the user's generated cards from history."""
+    """Delete one of the user's generated cards from history. Files are removed only after the commit:
+    a failed transaction must not leave a card pointing at deleted pictures."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -666,14 +734,15 @@ def delete_history_item(card_id: int, user_id: int) -> bool:
                 (card_id, user_id),
             ).fetchone()
             cursor.execute("DELETE FROM generated_cards WHERE id = ? AND user_id = ?", (card_id, user_id))
-            if row and cursor.rowcount > 0:
-                delete_photo(row["studio_photo_url"])
-                delete_photo(row["source_photo_url"])
+            deleted = cursor.rowcount > 0
             conn.commit()
-            return cursor.rowcount > 0
     except Exception as exc:
         logger.error("Failed to delete history item: %s", exc)
         return False
+    if row and deleted:
+        delete_photo(row["studio_photo_url"])
+        delete_photo(row["source_photo_url"])
+    return deleted
 
 
 def clear_history(user_id: int) -> bool:
@@ -689,13 +758,31 @@ def clear_history(user_id: int) -> bool:
                 for ref in (r["studio_photo_url"], r["source_photo_url"])
             ]
             cursor.execute("DELETE FROM generated_cards WHERE user_id = ?", (user_id,))
-            for photo in photos:
-                delete_photo(photo)
             conn.commit()
-            return True
     except Exception as exc:
         logger.error("Failed to clear history: %s", exc)
         return False
+    for photo in photos:  # only after the commit
+        delete_photo(photo)
+    return True
+
+
+def remember_telegram_update(update_id: int) -> bool:
+    """True the first time an update id is seen, False for a repeated delivery. Keeps the last ~1000 ids."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.execute("INSERT OR IGNORE INTO telegram_updates (update_id) VALUES (?)", (int(update_id),))
+            fresh = cur.rowcount > 0
+            if fresh and update_id % 50 == 0:
+                conn.execute(
+                    "DELETE FROM telegram_updates WHERE update_id NOT IN "
+                    "(SELECT update_id FROM telegram_updates ORDER BY created_at DESC, update_id DESC LIMIT 1000)"
+                )
+            conn.commit()
+            return fresh
+    except Exception as exc:
+        logger.warning("Could not record telegram update %s: %s", update_id, exc)
+        return True  # when in doubt, handle the update
 
 
 # ===========================================================================
@@ -734,17 +821,21 @@ def set_card_poster_config(card_id: int, user_id: int, config: Dict[str, Any]) -
 
 
 def update_card_info(card_id: int, user_id: int, studio_photo_url: Optional[str], info_config: Dict[str, Any],
-                     poster_config: Optional[Dict[str, Any]] = None, style: Optional[str] = None) -> Optional[str]:
-    """Replace a card's picture and info settings after a re-generation. Returns the previous picture reference
-    (so the caller can delete the old file), or None if the card is not the user's."""
-    try:
-        with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT studio_photo_url FROM generated_cards WHERE id = ? AND user_id = ?", (card_id, user_id)
-            ).fetchone()
-            if not row:
-                return None
-            new_ref = store_photo(studio_photo_url) if studio_photo_url else row["studio_photo_url"]
+                     poster_config: Optional[Dict[str, Any]] = None, style: Optional[str] = None) -> str:
+    """Replace a card's picture and info settings after a re-generation.
+
+    Returns the previous picture reference so the caller can delete the old file ("" if the picture did not change).
+    Raises LookupError when the card does not exist or belongs to someone else, and re-raises database errors
+    after removing the newly written file, so "not found" and "failed" are never confused.
+    """
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT studio_photo_url FROM generated_cards WHERE id = ? AND user_id = ?", (card_id, user_id)
+        ).fetchone()
+        if not row:
+            raise LookupError("card not found")
+        new_ref = store_photo(studio_photo_url) if studio_photo_url else row["studio_photo_url"]
+        try:
             conn.execute(
                 "UPDATE generated_cards SET studio_photo_url = ?, info_config = ?, poster_config = COALESCE(?, poster_config), "
                 "photoshoot_style = COALESCE(?, photoshoot_style) WHERE id = ? AND user_id = ?",
@@ -752,10 +843,12 @@ def update_card_info(card_id: int, user_id: int, studio_photo_url: Optional[str]
                  json.dumps(poster_config, ensure_ascii=False) if poster_config else None, style, card_id, user_id),
             )
             conn.commit()
-            return row["studio_photo_url"] if new_ref != row["studio_photo_url"] else ""
-    except Exception as exc:
-        logger.error("Failed to update card info: %s", exc)
-        return None
+        except Exception as exc:
+            logger.error("Failed to update card info: %s", exc)
+            if new_ref != row["studio_photo_url"]:
+                delete_photo(new_ref)  # the new file would be an orphan
+            raise
+        return row["studio_photo_url"] if new_ref != row["studio_photo_url"] else ""
 
 
 def get_brand(user_id: int) -> Dict[str, Any]:
@@ -839,7 +932,7 @@ def upsert_user(
                 admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "").strip()
                 if admin_ids_str:
                     admin_ids = [i.strip() for i in admin_ids_str.split(",") if i.strip()]
-                    if str(tg_id) in admin_ids and not existing.get("is_admin"):
+                    if str(tg_id) in admin_ids and not existing["is_admin"]:
                         update_fields.append("is_admin = 1")
 
                 params.append(existing["user_id"])
@@ -1093,8 +1186,8 @@ def get_all_users(
             """
             params: List[Any] = []
             if search.strip():
-                kw = f"%{search.strip()}%"
-                query += " AND (u.name LIKE ? OR u.tg_username LIKE ? OR u.tg_first_name LIKE ? OR CAST(u.tg_id AS TEXT) LIKE ?)"
+                kw = like_pattern(search.strip())
+                query += " AND (u.name LIKE ? ESCAPE '\\' OR u.tg_username LIKE ? ESCAPE '\\' OR u.tg_first_name LIKE ? ESCAPE '\\' OR CAST(u.tg_id AS TEXT) LIKE ? ESCAPE '\\')"
                 params.extend([kw, kw, kw, kw])
             if status.strip():
                 query += " AND u.status = ?"
@@ -1125,8 +1218,8 @@ def get_users_count(
             query = "SELECT COUNT(*) as total FROM users WHERE 1=1"
             params: List[Any] = []
             if search.strip():
-                kw = f"%{search.strip()}%"
-                query += " AND (name LIKE ? OR tg_username LIKE ? OR tg_first_name LIKE ? OR CAST(tg_id AS TEXT) LIKE ?)"
+                kw = like_pattern(search.strip())
+                query += " AND (name LIKE ? ESCAPE '\\' OR tg_username LIKE ? ESCAPE '\\' OR tg_first_name LIKE ? ESCAPE '\\' OR CAST(tg_id AS TEXT) LIKE ? ESCAPE '\\')"
                 params.extend([kw, kw, kw, kw])
             if status.strip():
                 query += " AND status = ?"
@@ -1426,7 +1519,8 @@ def get_uzum_settings(user_id: int, include_secret: bool = False) -> Dict[str, A
             row = cursor.fetchone()
             if row:
                 d = dict(row)
-                raw_key = d.get("api_key") or ""
+                raw_key = secret_box.decrypt(d.get("api_key")) or ""
+                d["api_key"] = raw_key
                 d["masked_key"] = _mask_key(raw_key)
                 if not include_secret:
                     d.pop("api_key", None)
@@ -1455,12 +1549,14 @@ def get_connected_uzum_user_ids() -> List[int]:
 
 
 def get_uzum_notifiable_user_ids() -> List[int]:
-    """Return ids of users with an Uzum connection (live or demo) and notifications enabled."""
+    """Return ids of users with a live Uzum connection and notifications enabled.
+    Demo accounts hold invented orders: nobody gets a "new order" push about them."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT user_id FROM uzum_settings WHERE is_connected = 1 AND notifications_enabled = 1"
+                "SELECT user_id FROM uzum_settings WHERE is_connected = 1 AND notifications_enabled = 1 "
+                "AND (is_demo = 0 OR is_demo IS NULL)"
             )
             return [int(r["user_id"]) for r in cursor.fetchall()]
     except Exception as exc:
@@ -1483,7 +1579,7 @@ def save_uzum_settings(
         current = get_uzum_settings(user_id, include_secret=True)
         values = (
             user_id,
-            api_key if api_key is not None else current.get("api_key"),
+            secret_box.encrypt(api_key if api_key is not None else current.get("api_key")),
             is_connected if is_connected is not None else current.get("is_connected", 0),
             is_demo if is_demo is not None else current.get("is_demo", 0),
             notifications_enabled if notifications_enabled is not None else current.get("notifications_enabled", 1),

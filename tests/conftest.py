@@ -26,6 +26,8 @@ os.environ["TELEGRAM_BOT_TOKEN"] = "123456:TEST-BOT-TOKEN"
 os.environ["TELEGRAM_WEBHOOK_SECRET"] = ""
 os.environ["WEBAPP_URL"] = ""
 os.environ["ADMIN_TELEGRAM_IDS"] = ""
+os.environ["GUESTS_PER_IP_PER_HOUR"] = "0"  # every test logs in from the same address; the limit has its own test
+os.environ["UZUM_KEY_FILE"] = str(Path(_tmpdir) / "uzum.key")
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN_KEY = os.environ["ADMIN_SECRET_KEY"]
@@ -82,3 +84,37 @@ def login(client, tg_id: int | None = None, token: str | None = None) -> dict:
 
 def auth(data: dict) -> dict:
     return {"Authorization": f"Bearer {data['session_token']}"}
+
+
+def media_qs(client, data: dict) -> str:
+    """`mt=<media token>` for URLs opened by <img>/<a> tags (the session token is not accepted in URLs)."""
+    res = client.post("/api/media-token", headers=auth(data))
+    assert res.status_code == 200, res.text
+    return "mt=" + res.json()["media_token"]
+
+
+@pytest.fixture()
+def fake_ai(monkeypatch):
+    """A working AI without the network: the text call answers with a fixed card (no picture).
+
+    Tests run with AI_MODE=mock, where every generation is an `ai_fallback` that is not saved; tests that
+    need real cards in the history use this fixture."""
+    from services import ai_service as ai_module
+
+    calls = []
+
+    async def fake_multimodal(self, image_bytes=None, image_mime="image/jpeg", cost_price=None, desired_price=None,
+                              note=None, lang="ru", photoshoot_style="minimal_studio", **kwargs):
+        calls.append({"style": photoshoot_style, "note": note, "has_image": bool(image_bytes)})
+        result = self._mock_response(lang, cost_price, desired_price, note)
+        result["photoshoot_style"] = photoshoot_style
+        return result
+
+    import types
+
+    # Patched on the instance: monkeypatch restores instance attributes by assignment, so a test that patched
+    # the instance earlier leaves a bound original there, which would shadow a patch of the class.
+    monkeypatch.setattr(ai_module.ai_service, "_call_gemini_multimodal", types.MethodType(fake_multimodal, ai_module.ai_service))
+    monkeypatch.setattr(ai_module.ai_service, "_client", object())
+    monkeypatch.setattr(ai_module.ai_service, "ai_mode", "gemini")
+    return calls

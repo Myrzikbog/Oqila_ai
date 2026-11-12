@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { withToken } from '../utils/session';
+import { mediaUrl, withToken } from '../utils/session';
+import { useMediaToken } from '../utils/useMediaToken';
 
 const escapeHtml = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -23,6 +24,7 @@ import {
 import { hapticImpact, hapticNotify } from '../utils/telegram';
 
 export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, userId }) {
+  useMediaToken(); // pictures are loaded with a short-lived media token: render again when it is renewed
   const [historyItems, setHistoryItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
@@ -41,7 +43,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
         (data.items || []).map((item) => ({
           ...item,
           // a poster is drawn on demand from its saved settings; show it instead of the raw AI scene
-          studio_photo_url: withToken(item.info_config && item.studio_photo_url ? item.studio_photo_url : (item.poster_url || item.studio_photo_url)),
+          studio_photo_url: item.info_config && item.studio_photo_url ? item.studio_photo_url : (item.poster_url || item.studio_photo_url),
         })),
       );
     } catch (err) {
@@ -122,11 +124,11 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleDownloadPhoto = (e, url) => {
+  const handleDownloadPhoto = async (e, url) => {
     e.stopPropagation();
     hapticImpact('light');
     const a = document.createElement('a');
-    a.href = url;
+    a.href = await mediaUrl(url);
     a.download = `oqila-studio-${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
@@ -162,7 +164,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
       <body>
         <div class="card">
           <span class="badge">Oqila AI • O'zbekiston Tadbirkorlari</span>
-          ${item.studio_photo_url ? `<img src="${escapeHtml(item.studio_photo_url)}" alt="${escapeHtml(item.title)}" />` : ''}
+          ${item.studio_photo_url ? `<img src="${escapeHtml(withToken(item.studio_photo_url))}" alt="${escapeHtml(item.title)}" />` : ''}
           <h1>${escapeHtml(item.title)}</h1>
           <div class="price">${escapeHtml(item.price_tag || '')}</div>
           <div class="desc">${escapeHtml(item.description || '')}</div>
@@ -374,7 +376,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
                   {item.studio_photo_url ? (
                     <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 border border-slate-100 dark:border-slate-700 bg-slate-100 dark:bg-slate-900">
                       <img
-                        src={item.studio_photo_url}
+                        src={withToken(item.studio_photo_url)}
                         alt=""
                         className="w-full h-full object-cover"
                       />

@@ -77,3 +77,4 @@ frontend/dist-ssr/
 
 # ===== Uploaded / generated media =====
 media/
+.uzum_key

@@ -12,6 +12,7 @@ Features:
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import io
 import json
@@ -19,6 +20,7 @@ import logging
 import os
 import random
 import re
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -159,9 +161,30 @@ WELCOME_TEXT_RU = (
 
 
 
+AI_UNAVAILABLE_TEXT = {
+    "ru": "⚠️ AI сейчас недоступен, попробуйте позже.",
+    "uz": "⚠️ AI hozir mavjud emas, keyinroq urinib ko'ring.",
+}
+
+
+def err_msg_bad_photo(lang: str) -> str:
+    return (
+        "⚠️ Не удалось открыть фото. Отправьте изображение в JPG или PNG."
+        if lang == "ru"
+        else "⚠️ Rasmni ochib bo'lmadi. JPG yoki PNG formatida yuboring."
+    )
+
+
+ADMIN_CACHE_TTL = 300
+ADMIN_SESSION_TTL = 3600
+
+
 class TelegramService:
     def __init__(self) -> None:
-        self._verified_admin_tg_ids: set[str] = set()
+        # Administrator rights: ADMIN_TELEGRAM_IDS or the is_admin flag set in the admin panel, cached for 5 minutes
+        # (so a revoked flag stops working without a restart). `/admin KEY` gives a 1-hour session kept in memory only.
+        self._admin_cache: Dict[str, tuple] = {}
+        self._admin_sessions: Dict[str, float] = {}
 
     @property
     def bot_token(self) -> str:
@@ -338,37 +361,37 @@ class TelegramService:
                 return False  # browser guests (negative ids) can never be administrators
         except ValueError:
             return False
-        if uid_str in self._verified_admin_tg_ids:
-            return True
-
+        now = time.monotonic()
         from services.session_service import check_admin_key
         if provided_key and check_admin_key(provided_key):
-            self._verified_admin_tg_ids.add(uid_str)
-            try:
-                from services.database import set_user_admin
-                set_user_admin(int(user_id), True)
-            except Exception:
-                pass
+            self._admin_sessions[uid_str] = now + ADMIN_SESSION_TTL  # nothing is written to the database
             return True
+        if self._admin_sessions.get(uid_str, 0) > now:
+            return True
+        self._admin_sessions.pop(uid_str, None)
 
-        admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "").strip()
-        if admin_ids_str:
-            admin_ids = [i.strip() for i in admin_ids_str.split(",") if i.strip()]
-            if uid_str in admin_ids:
-                self._verified_admin_tg_ids.add(uid_str)
-                return True
+        cached = self._admin_cache.get(uid_str)
+        if cached and cached[1] > now:
+            return cached[0]
 
-        # Check database persistent status
-        try:
-            from services.database import get_user_by_tg_id
-            u = get_user_by_tg_id(int(user_id))
-            if u and u.get("is_admin"):
-                self._verified_admin_tg_ids.add(uid_str)
-                return True
-        except Exception:
-            pass
+        admin_ids = [i.strip() for i in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",") if i.strip()]
+        result = uid_str in admin_ids
+        if not result:
+            try:
+                from services.database import get_user_by_tg_id
+                u = get_user_by_tg_id(int(uid_str))
+                result = bool(u and u.get("is_admin"))
+            except Exception:
+                result = False
+        self._admin_cache[uid_str] = (result, now + ADMIN_CACHE_TTL)
+        return result
 
-        return False
+    def forget_admin_cache(self, tg_id: Optional[int] = None) -> None:
+        """Drop cached admin decisions (after the flag was changed in the admin panel)."""
+        if tg_id is None:
+            self._admin_cache.clear()
+        else:
+            self._admin_cache.pop(str(tg_id), None)
 
     async def answer_callback_query(self, callback_query_id: str, text: Optional[str] = None) -> bool:
         """Acknowledge a callback query from an inline keyboard button."""
@@ -1200,19 +1223,59 @@ class TelegramService:
             return
 
         from services.ai_service import ai_service
+        from services.database import log_event, upsert_user
+        from services.rate_limit import LimitExceeded, finish, global_ai_budget_exhausted, reserve
+
+        # The bot spends the same AI quota as the app: same per-user limits, same global budget
+        sender = msg.get("from", {}) or {}
+        tg_id = sender.get("id") or chat_id
+        app_user_id = self._app_user_id(tg_id)
+        if not app_user_id:
+            app_user_id = upsert_user(
+                tg_id=tg_id, tg_username=sender.get("username") or "", tg_first_name=sender.get("first_name") or ""
+            ).get("user_id")
+        if not app_user_id:
+            await self.send_message(chat_id, AI_UNAVAILABLE_TEXT[user_lang])
+            return
+        try:
+            reservation = reserve("generate_card", app_user_id, user_lang)
+        except LimitExceeded as exc:
+            await self.send_message(chat_id, f"⏳ {html.escape(str(exc))}")
+            return
+
+        delivered = False
         try:
             caption_text = msg.get("caption", "")
             default_note = "Ремесленное или национальное изделие" if user_lang == "ru" else "Hunarmandchilik yoki milliy mahsulot"
+            try:
+                from services.poster import normalize_source
+                file_bytes = await asyncio.get_running_loop().run_in_executor(None, normalize_source, file_bytes)
+            except ValueError:
+                await self.send_message(chat_id, err_msg_bad_photo(user_lang))
+                return
             card = await ai_service.generate_product_card(
                 image_bytes=file_bytes,
                 image_mime="image/jpeg",
+                cost_price=None,
+                desired_price=None,
                 note=caption_text or default_note,
                 lang=user_lang,
                 photoshoot_style="minimal_studio",
                 content_tone="sales",
                 content_format="instagram",
                 generate_photo=False,
+                force_mock=global_ai_budget_exhausted(),
             )
+            fallback = card.get("ai_fallback")
+            log_event(
+                "generate_card", lang=user_lang, is_mock=bool(fallback),
+                details={"source": "bot", "ai_fallback": fallback}, user_id=app_user_id,
+            )
+            if fallback:
+                # Never pass the built-in sample post off as a description of the user's product
+                await self.send_message(chat_id, AI_UNAVAILABLE_TEXT[user_lang])
+                return
+            delivered = True
 
             title = html.escape(str(card.get("title", "")))
             desc = html.escape(str(card.get("description", "")))
@@ -1263,6 +1326,8 @@ class TelegramService:
                 fallback_err,
                 reply_markup=self._build_main_keyboard(app_url, lang=user_lang),
             )
+        finally:
+            finish(reservation, delivered)
 
     async def _handle_inline_query(self, iq: Dict[str, Any], app_url: str) -> None:
         """Handle inline query @bot 350000 120000 (Item 4)."""

@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
+from services.imaging import open_checked
 from services.presets import ASPECTS, DEFAULT_ASPECT, DEFAULT_PALETTE, LAYOUTS, PALETTES
 
 FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
@@ -647,30 +648,17 @@ def poster_to_png(image: Image.Image) -> bytes:
 
 def normalize_logo(raw: bytes, max_side: int = 512) -> bytes:
     """Validate an uploaded logo and return it as a small PNG (raises ValueError if it is not an image)."""
-    try:
-        img = Image.open(io.BytesIO(raw))
-        img.load()
-    except Exception as exc:
-        raise ValueError("not an image") from exc
-    if img.width * img.height > 40_000_000:
-        raise ValueError("image too large")
-    img = ImageOps.exif_transpose(img).convert("RGBA")
+    img = ImageOps.exif_transpose(open_checked(raw)).convert("RGBA")
     img.thumbnail((max_side, max_side), Image.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
 
 
-def normalize_source(raw: bytes, max_side: int = 1600) -> bytes:
-    """Validate the seller's photo and return a compact JPEG (raises ValueError if it is not an image)."""
-    try:
-        img = Image.open(io.BytesIO(raw))
-        img.load()
-    except Exception as exc:
-        raise ValueError("not an image") from exc
-    if img.width * img.height > 60_000_000:
-        raise ValueError("image too large")
-    img = ImageOps.exif_transpose(img).convert("RGB")
+def normalize_source(raw: bytes, max_side: int = 2048) -> bytes:
+    """Validate the seller's photo and return a compact JPEG (raises ValueError if it is not an image).
+    The same JPEG is stored and sent to the AI: no raw client bytes go any further."""
+    img = ImageOps.exif_transpose(open_checked(raw)).convert("RGB")
     img.thumbnail((max_side, max_side), Image.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=88, optimize=True)

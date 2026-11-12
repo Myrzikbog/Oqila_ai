@@ -1,7 +1,7 @@
 """Access control: path traversal, per-user data isolation, admin and webhook protection."""
 import pytest
 
-from conftest import ADMIN_KEY, auth, login, make_init_data
+from conftest import media_qs, ADMIN_KEY, auth, login, make_init_data
 
 
 # --- Static files / path traversal -----------------------------------------------------------
@@ -58,7 +58,7 @@ def test_users_cannot_touch_each_others_cards(client):
     assert client.delete(f"/api/history/{card}", headers=auth(alice)).status_code == 200
 
 
-def test_generate_card_is_saved_for_token_owner(client):
+def test_generate_card_is_saved_for_token_owner(client, fake_ai):
     alice = login(client, tg_id=880003)
     bob = login(client, tg_id=880004)
     res = client.post(
@@ -116,9 +116,9 @@ def test_uzum_data_is_isolated_between_users(client):
     assert client.get("/api/uzum/orders", headers=auth(alice)).json()["orders"]
     assert client.get("/api/uzum/orders", headers=auth(bob)).json()["orders"] == []
 
-    # Alice can act on her own data; the label works with ?token= for <img> tags
+    # Alice can act on her own data; the label works with a media token (?mt=) for <img> tags
     assert client.post(f"/api/uzum/orders/{order_id}/confirm", headers=auth(alice)).status_code == 200
-    svg = client.get(f"/api/uzum/orders/{order_id}/label.svg?token={alice['session_token']}")
+    svg = client.get(f"/api/uzum/orders/{order_id}/label.svg?{media_qs(client, alice)}")
     assert svg.status_code == 200 and svg.text.startswith("<svg")
 
 
@@ -145,12 +145,22 @@ def test_order_notifications_go_to_owner(client, no_telegram_network):
 
     from services.uzum_service import uzum_service
 
+    from services.database import get_uzum_orders, save_uzum_orders, save_uzum_settings
+
+    # Demo data is invented: it never produces "new order" pushes
+    demo = login(client, tg_id=890006)
+    client.post("/api/uzum/settings", json={"is_demo": True}, headers=auth(demo))
+    asyncio.run(uzum_service.notify_all_users())
+    assert no_telegram_network == []
+
+    # A live connection with a new order notifies its owner, and only the owner
     alice = login(client, tg_id=890005)
-    client.post("/api/uzum/settings", json={"is_demo": True}, headers=auth(alice))
+    order = dict(get_uzum_orders(demo["user_id"])[0], is_notified=0)
+    save_uzum_settings(alice["user_id"], api_key="live-key-123456", is_connected=1, is_demo=0)
+    save_uzum_orders(alice["user_id"], [order])
     asyncio.run(uzum_service.notify_all_users())
     recipients = {m["chat_id"] for m in no_telegram_network}
-    assert 890005 in recipients
-    assert all(r > 0 for r in recipients)
+    assert recipients == {890005}
 
 
 def test_legacy_single_tenant_uzum_tables_are_migrated(tmp_path, monkeypatch):

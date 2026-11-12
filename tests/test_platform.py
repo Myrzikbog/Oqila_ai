@@ -6,7 +6,7 @@ import sqlite3
 import pytest
 from PIL import Image
 
-from conftest import auth, login
+from conftest import auth, login, media_qs
 
 
 def _png_data_url() -> str:
@@ -17,7 +17,7 @@ def _png_data_url() -> str:
 
 # --- Rate limits ---------------------------------------------------------------------------
 
-def test_generate_card_is_rate_limited_per_user(client, monkeypatch):
+def test_generate_card_is_rate_limited_per_user(client, monkeypatch, fake_ai):
     monkeypatch.setenv("AI_CARD_LIMIT_PER_HOUR", "2")
     alice = login(client, tg_id=920001)
     bob = login(client, tg_id=920002)
@@ -31,6 +31,12 @@ def test_generate_card_is_rate_limited_per_user(client, monkeypatch):
 
 
 def test_legal_qa_is_rate_limited(client, monkeypatch):
+    from services import ai_service as ai_module
+
+    async def real_answer(self, question, lang="ru", user_profile=None, force_mock=False):
+        return "ok", None
+
+    monkeypatch.setattr(ai_module.AIService, "legal_qa", real_answer)
     monkeypatch.setenv("AI_LEGAL_LIMIT_PER_HOUR", "1")
     user = login(client, tg_id=920003)
     assert client.post("/api/legal-qa", json={"question": "YaTT qanday ochiladi?"}, headers=auth(user)).status_code == 200
@@ -39,7 +45,7 @@ def test_legal_qa_is_rate_limited(client, monkeypatch):
 
 def test_global_budget_switches_to_mock_instead_of_failing(client, monkeypatch):
     from services import ai_service as ai_module
-    from services.database import log_event
+    from services.rate_limit import record_ai_call
 
     calls = []
 
@@ -56,9 +62,10 @@ def test_global_budget_switches_to_mock_instead_of_failing(client, monkeypatch):
     assert client.post("/api/generate-card", data={"note": "x"}, headers=auth(user)).json()["title"] == "real"
 
     monkeypatch.setenv("AI_GLOBAL_DAILY_LIMIT", "1")
-    log_event("generate_card", is_mock=False, user_id=user["user_id"])
+    record_ai_call("text", "test")  # the budget counts real Gemini calls, not generations
     res = client.post("/api/generate-card", data={"note": "x"}, headers=auth(user))
     assert res.status_code == 200 and res.json()["title"] != "real"
+    assert res.json()["ai_fallback"] == "quota" and res.json()["id"] is None, "sample text is flagged and not saved"
     assert len(calls) == 1
 
 
@@ -91,7 +98,7 @@ def test_card_photo_is_stored_as_file_and_served(client):
 
     item = next(i for i in client.get("/api/history", headers=auth(alice)).json()["items"] if i["id"] == card_id)
     assert item["studio_photo_url"] == f"/api/cards/{card_id}/photo"
-    res = client.get(f"/api/cards/{card_id}/photo?token={alice['session_token']}")
+    res = client.get(f"/api/cards/{card_id}/photo?{media_qs(client, alice)}")
     assert res.status_code == 200 and res.headers["content-type"] == "image/png"
     assert client.get(f"/api/cards/{card_id}/photo", headers=auth(bob)).status_code == 404
 
