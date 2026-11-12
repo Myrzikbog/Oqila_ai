@@ -1,15 +1,10 @@
 """
-poster.py — draws the information on a poster over a product picture.
+legacy_poster.py — the old server-side poster renderer, kept ONLY for scripts/migrate_posters.py.
 
-The AI image model draws the scene (and leaves calm space for text). Everything with a meaning —
-title, price, benefits, contacts, discount — is drawn here, so numbers, Cyrillic and Uzbek letters
-(o', g', sh, ch) are always exact and the seller can edit them without another AI call.
-
-Public API:
-    PosterSpec.from_dict(data)     validated, length-limited text fields + layout/aspect/palette
-    render_poster(spec, background=None, source=None, logo=None) -> PIL.Image
-    poster_to_png(image) -> bytes
-    poster_defaults(card, desired_price, lang) -> dict   (text fields prefilled from an AI card)
+Until the unified AI pipeline, posters were not stored as pictures: they were drawn on every request from a text
+config (poster_config). The migration "bakes" each of those posters into an ordinary picture once, so the cards
+of existing sellers keep looking the way they did. Nothing in the application imports this module: the server
+no longer draws text on marketing pictures (tests/test_no_server_text.py guards that).
 """
 from __future__ import annotations
 
@@ -22,10 +17,23 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
-from services.imaging import open_checked
-from services.presets import ASPECTS, DEFAULT_ASPECT, DEFAULT_PALETTE, LAYOUTS, PALETTES
+ASPECTS: Dict[str, Dict[str, Any]] = {
+    "1:1": {"size": (1080, 1080)}, "4:5": {"size": (1080, 1350)}, "3:4": {"size": (1080, 1440)}, "9:16": {"size": (1080, 1920)},
+}
+DEFAULT_ASPECT = "1:1"
+PALETTES: Dict[str, Dict[str, Any]] = {
+    "brand": {"plate": "#0f766e", "text": "#ffffff", "accent": "#fde68a"},
+    "dark": {"plate": "#111827", "text": "#ffffff", "accent": "#fbbf24"},
+    "light": {"plate": "#ffffff", "text": "#111827", "accent": "#be123c"},
+    "warm": {"plate": "#9a3412", "text": "#fff7ed", "accent": "#fed7aa"},
+}
+DEFAULT_PALETTE = "brand"
+LAYOUTS: Dict[str, Dict[str, Any]] = {
+    "showcase": {"aspect": "3:4"}, "magazine": {"aspect": "3:4"}, "minimal": {"aspect": "1:1"}, "sale": {"aspect": "1:1"},
+    "new_arrival": {"aspect": "1:1"}, "limited": {"aspect": "4:5"}, "callouts": {"aspect": "3:4"}, "story": {"aspect": "9:16"},
+}
 
-FONT_DIR = Path(__file__).resolve().parent.parent / "assets" / "fonts"
+FONT_DIR = Path(__file__).resolve().parent / "legacy_fonts"
 _WEIGHTS = {"regular": "Inter-Regular.otf", "medium": "Inter-Medium.otf", "bold": "Inter-Bold.otf", "xbold": "Inter-ExtraBold.otf"}
 MAX_SOURCE_SIDE = 2400
 

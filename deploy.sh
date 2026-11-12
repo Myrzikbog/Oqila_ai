@@ -70,6 +70,8 @@ ensure_secret TELEGRAM_WEBHOOK_SECRET
 
 # Move card photos stored inline in SQLite (older versions) into media/ files
 python scripts/migrate_photos_to_files.py
+# Old server-drawn posters become ordinary pictures (idempotent: a second run finds nothing to do)
+python scripts/migrate_posters.py
 
 # 5. Setup systemd service for 24/7 background run
 echo "⚙️ Step 4: Setting up systemd service..."

@@ -419,10 +419,10 @@ def test_card_update_tells_missing_from_broken(client, monkeypatch, fake_ai):
     alice, bob = login(client, tg_id=810062), login(client, tg_id=810063)
     card_id = db.save_generated_card(title="t", description="", price_tag="", hashtags=[], marketing_tip="", user_id=alice["user_id"])
     with pytest.raises(LookupError):
-        db.update_card_info(card_id, bob["user_id"], None, {"title": "x"})
+        db.update_card_render(card_id, bob["user_id"], None, {"title": "x"})
     with pytest.raises(LookupError):
-        db.update_card_info(10**9, alice["user_id"], None, {"title": "x"})
-    assert db.update_card_info(card_id, alice["user_id"], None, {"title": "x"}) == ""
+        db.update_card_render(10**9, alice["user_id"], None, {"title": "x"})
+    assert db.update_card_render(card_id, alice["user_id"], None, {"title": "x"}) == ""
 
     # a database error is an error, and the newly written picture is not left behind
     stored = []
@@ -439,7 +439,7 @@ def test_card_update_tells_missing_from_broken(client, monkeypatch, fake_ai):
     from services.media_storage import resolve_photo
 
     with pytest.raises(RuntimeError):
-        db.update_card_info(card_id, alice["user_id"], to_data_url(finalize_card(_png())), {"title": "y"})
+        db.update_card_render(card_id, alice["user_id"], to_data_url(finalize_card(_png())), {"title": "y"})
     assert stored and resolve_photo(stored[0]) is None
 
 

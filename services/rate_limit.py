@@ -60,8 +60,8 @@ LIMITS = {
     "generate_card": Limit(("generate_card",), "AI_CARD_LIMIT_PER_HOUR", 20, "AI_CARD_LIMIT_PER_DAY", 60),
     "legal_qa": Limit(("legal_qa",), "AI_LEGAL_LIMIT_PER_HOUR", 30, "AI_LEGAL_LIMIT_PER_DAY", 100),
     "demo_card": Limit(("demo_card",), "DEMO_CARD_LIMIT_PER_HOUR", 30, "DEMO_CARD_LIMIT_PER_DAY", 100),
-    # Poster edits are drawn locally (no AI), so the limit only guards the CPU
-    "poster_render": Limit(("poster_render",), "POSTER_RENDER_LIMIT_PER_HOUR", 400, "POSTER_RENDER_LIMIT_PER_DAY", 3000),
+    # Writing the text of a picture again: one cheap text call, no image
+    "card_copy": Limit(("card_copy",), "AI_COPY_LIMIT_PER_HOUR", 60, "AI_COPY_LIMIT_PER_DAY", 200),
 }
 
 # Actions that spend AI quota: limited through reserve(), reported by GET /api/limits

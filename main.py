@@ -50,7 +50,7 @@ from services.database import (
     get_history,
     get_history_count,
     get_brand,
-    get_card_for_poster,
+    get_card,
     get_stats,
     get_user,
     get_user_by_tg_id,
@@ -61,8 +61,7 @@ from services.database import (
     save_brand,
     save_generated_card,
     set_brand_logo,
-    set_card_poster_config,
-    update_card_info,
+    update_card_render,
     toggle_favorite,
     toggle_user_active,
     update_user_profile,
@@ -74,10 +73,8 @@ from services.legal_calc import (
     calculate,
 )
 from services.media_storage import delete_photo, resolve_photo, store_bytes
-from services.poster import PosterSpec, poster_to_png, render_poster
-from services.info_photo import InfoSpec, build_spec
-from services.copy_utils import default_copy, format_price
-from services.presets import ASPECTS, STYLES_BY_ID, default_aspect, needs_overlay, layout_for, public_registry, style_kind
+from services.info_photo import CopySpec, apply_slots, too_long_fields
+from services.presets import STYLES_BY_ID, pick_aspect, public_registry, style_kind
 from services.imaging import ImageRejected, normalize_logo, normalize_source
 from services.rate_limit import (
     LimitExceeded,
@@ -524,11 +521,39 @@ def update_profile(req: UpdateProfileRequest, user: dict = Depends(current_user)
 # ---------------------------------------------------------------------------
 # Tab 1: AI Studio — Product Card Generation
 # ---------------------------------------------------------------------------
+TEXT_RENDER_UNAVAILABLE = {
+    "ru": "Генерация картинок с текстом временно недоступна. Попробуйте позже.",
+    "uz": "Matnli rasm yaratish vaqtincha mavjud emas. Keyinroq urinib ko'ring.",
+}
+
+
+def _msg(texts: dict, lang: Optional[str]) -> str:
+    return texts["uz" if lang == "uz" else "ru"]
+
+
+def _brand_for_ai(user_id: int) -> tuple:
+    """(brand settings, logo PNG bytes or None): the brand goes into the prompt, the logo is a reference image."""
+    brand = get_brand(user_id)
+    logo_path = resolve_photo(brand.get("brand_logo"))
+    logo = None
+    if logo_path:
+        try:
+            logo = logo_path.read_bytes()
+        except OSError:
+            logo = None
+    return brand, logo
+
+
+def _photo_url(card_id: int, version: Optional[int] = None) -> str:
+    return f"/api/cards/{card_id}/photo" + (f"?v={version}" if version else "")
+
+
 @app.post("/api/generate-card")
 async def generate_card(
     image: Optional[UploadFile] = File(None),
     cost_price: Optional[float] = Form(None),
     desired_price: Optional[float] = Form(None),
+    old_price: Optional[float] = Form(None),
     note: Optional[str] = Form(None),
     lang: str = Form("ru"),
     photoshoot_style: str = Form("minimal_studio"),
@@ -536,22 +561,24 @@ async def generate_card(
     content_tone: str = Form("luxury"),
     content_format: str = Form("instagram"),
     generate_photo: bool = Form(True),
+    text_only: bool = Form(False),
     aspect_ratio: str = Form(""),
     info_text: str = Form(""),
     user_id: Optional[int] = Form(None),  # ignored: the user always comes from the session token
     user: dict = Depends(current_user),
 ):
     """
-    Generate a product marketing card.
-    Accepts multipart form with optional image + metadata and photoshoot options.
-    Supports generation from image or text description and custom prompts.
-    Returns JSON with title, description, price_tag, hashtags, marketing_tip, and studio_photo_url.
+    Generate a product marketing card: the selling text and, depending on the style, a studio photo or a picture
+    with text drawn by the AI.
+
+    For styles with text the answer carries `copy` (what is written on the picture) and `verification` (the result
+    of reading the text back). `text_only=true` stops after the text, so the seller can correct it before
+    POST /api/cards/{id}/render draws the picture.
     """
     user_id = user["user_id"]
     if photoshoot_style not in STYLES_BY_ID:
         photoshoot_style = "minimal_studio"
-    aspect = aspect_ratio if aspect_ratio in ASPECTS else default_aspect(photoshoot_style)
-    overlay = needs_overlay(photoshoot_style)  # poster styles: the server draws the text over the picture
+    aspect = pick_aspect(photoshoot_style, aspect_ratio)
     kind = style_kind(photoshoot_style)
     info_text = " ".join(info_text.split("\r")).strip()[:1500]
     # A bad upload is rejected before any quota is taken
@@ -563,9 +590,11 @@ async def generate_card(
     try:
         use_mock = ai_service.is_mock or global_ai_budget_exhausted()
         logger.info(
-            "generate_card — lang=%s, has_image=%s, style=%s, custom_prompt=%s, tone=%s, format=%s, gen_photo=%s",
-            lang, image_bytes is not None, photoshoot_style, bool(photoshoot_prompt), content_tone, content_format, generate_photo,
+            "generate_card — lang=%s, has_image=%s, style=%s, custom_prompt=%s, tone=%s, format=%s, gen_photo=%s, text_only=%s",
+            lang, image_bytes is not None, photoshoot_style, bool(photoshoot_prompt), content_tone, content_format,
+            generate_photo, text_only,
         )
+        brand, logo = (await run_blocking(_brand_for_ai, user_id)) if kind == "ai_text" else (None, None)
 
         result = await ai_service.generate_product_card(
             image_bytes=image_bytes,
@@ -578,10 +607,13 @@ async def generate_card(
             photoshoot_prompt=photoshoot_prompt,
             content_tone=content_tone,
             content_format=content_format,
-            generate_photo=generate_photo,
+            generate_photo=generate_photo and not text_only,
             force_mock=use_mock,
             aspect_ratio=aspect,
             info_text=info_text,
+            old_price=old_price,
+            brand=brand,
+            logo=logo,
         )
 
         fallback = result.get("ai_fallback")
@@ -596,39 +628,16 @@ async def generate_card(
             )
             return JSONResponse(content=result)
 
-        # Posters, information cards and clean photos keep the seller's own photo (fallback background, re-generation)
+        # Pictures with text and clean photos keep the seller's own photo: it is the reference for every re-render
         source_ref: Optional[str] = None
-        poster_config: Optional[dict] = None
-        info_config: Optional[dict] = None
-        if (overlay or kind in ("ai_text", "clean")) and image_bytes:
+        if kind in ("ai_text", "clean") and image_bytes:
             source_ref = await run_blocking(store_bytes, "source", image_bytes, "jpg")
+        info_config: Optional[dict] = None
         if kind == "ai_text":
-            info_config = result.get("info")
-            if not info_config:
-                defaults = default_copy(result, None, lang)
-                spec = build_spec({"benefits": defaults["bullets"]}, info_text, defaults["title"], lang, allowed_text=note)
-                info_config = {**spec.to_dict(), "verified": None, "missing": [], "unexpected": [], "attempts": 0}
-                result["info"] = info_config
-            brand = get_brand(user_id)
-            poster_config = _info_poster_config(info_config, brand, desired_price, lang)
-            result["poster"] = poster_config
-            result["poster_has_scene"] = False
-            result["poster_url"] = None  # set below once the card id is known
-            result["display"] = "photo" if result.get("studio_photo_url") else "poster"
-        elif overlay:
-            brand = get_brand(user_id)
-            poster_config = PosterSpec.from_dict({
-                "layout": layout_for(photoshoot_style),
-                "aspect": aspect,
-                "palette": "custom" if brand["brand_color"] else "brand",
-                "brand_color": brand["brand_color"],
-                "lang": lang,
-                "contact": brand["brand_contact"],
-                "brand_name": brand["brand_name"],
-                "show_logo": bool(brand["brand_logo"]),
-                **default_copy(result, desired_price, lang),
-            }).to_dict()
-            result["display"] = "poster"
+            if not isinstance(result.get("copy"), dict):
+                # the text model failed but a picture exists: there is no copy to show
+                result["copy"] = apply_slots(CopySpec.from_dict({"title": result.get("title", ""), "lang": lang}), photoshoot_style).to_dict()
+            info_config = {"copy": result["copy"], "verification": result.get("verification"), "aspect": aspect}
 
         # Save to history database
         card_id = await run_blocking(lambda: save_generated_card(
@@ -647,7 +656,6 @@ async def generate_card(
             lang=lang,
             user_id=user_id,
             source_photo_url=source_ref,
-            poster_config=poster_config,
             info_config=info_config,
         ))
         if not card_id:
@@ -655,14 +663,9 @@ async def generate_card(
             raise HTTPException(status_code=500, detail="Could not save the card. Please try again.")
         delivered = True
         result["id"] = card_id
-        if kind == "ai_text" and poster_config:
-            result["poster_url"] = f"/api/cards/{card_id}/poster.png"
-        elif poster_config:
-            # The picture is drawn on demand from the config: no need to ship the raw AI scene to the client
-            result["poster_has_scene"] = bool(result.get("studio_photo_url"))
-            result["studio_photo_url"] = None
-            result["poster"] = poster_config
-            result["poster_url"] = f"/api/cards/{card_id}/poster.png"
+        result["aspect"] = aspect
+        result["version"] = 1
+        result["has_source"] = bool(source_ref)
 
         log_event(
             event_type="generate_card",
@@ -677,6 +680,8 @@ async def generate_card(
                 "tone": content_tone,
                 "format": content_format,
                 "has_studio_photo": bool(result.get("studio_photo_url")),
+                "verified": (result.get("verification") or {}).get("verified"),
+                "image_calls": result.get("image_calls"),
             },
             user_id=user_id,
         )
@@ -742,7 +747,7 @@ def demo_card(lang: str = "ru", user: dict = Depends(current_user)):
 
 @app.get("/api/photoshoot-presets")
 def get_photoshoot_presets():
-    """Registry of everything the studio can produce: output types, styles, layouts, aspect ratios, palettes."""
+    """Registry of everything the studio can produce: output types, styles with their text fields and limits, aspect ratios."""
     from services.ai_service import TONE_PRESETS, FORMAT_PRESETS
     registry = public_registry()
     registry["tones"] = TONE_PRESETS
@@ -798,8 +803,9 @@ def delete_card_history_item(card_id: int, user: dict = Depends(current_user)):
     return {"status": "ok", "deleted_id": card_id}
 
 
-def _card_photo_response(card_id: int, owner_id: Optional[int]) -> Response:
-    """Serve a card's studio photo; owner_id=None means any card (administrators only)."""
+def _card_photo_response(card_id: int, owner_id: Optional[int], download: bool = False) -> Response:
+    """Serve a card's studio photo; owner_id=None means any card (administrators only).
+    download=True adds Content-Disposition: attachment with a file name whose extension matches the real type."""
     from fastapi.responses import FileResponse, RedirectResponse
     from services.database import get_db_connection
     from services.media_storage import MIME_BY_EXT, resolve_photo
@@ -821,7 +827,10 @@ def _card_photo_response(card_id: int, owner_id: Optional[int]) -> Response:
         path = resolve_photo(photo_val)
         if not path:
             raise HTTPException(status_code=404, detail="Photo not found")
-        mime = MIME_BY_EXT.get(path.suffix.lstrip(".").lower(), "application/octet-stream")
+        ext = path.suffix.lstrip(".").lower()
+        mime = MIME_BY_EXT.get(ext, "application/octet-stream")
+        if download:
+            cache = {**cache, "Content-Disposition": f'attachment; filename="oqila-{card_id}.{ext or "jpg"}"'}
         return FileResponse(str(path), media_type=mime, headers=cache)
     if photo_val.startswith("data:"):  # legacy rows stored before photos moved to files
         try:
@@ -834,6 +843,8 @@ def _card_photo_response(card_id: int, owner_id: Optional[int]) -> Response:
             raw_bytes = base64.b64decode(b64_data)
         except Exception:
             raise HTTPException(status_code=500, detail="Failed to decode photo")
+        if download:
+            cache = {**cache, "Content-Disposition": f'attachment; filename="oqila-{card_id}.{mime.split("/")[1].replace("jpeg", "jpg")}"'}
         return Response(content=raw_bytes, media_type=mime, headers=cache)
     if photo_val.startswith("https://"):
         return RedirectResponse(url=photo_val)
@@ -841,161 +852,156 @@ def _card_photo_response(card_id: int, owner_id: Optional[int]) -> Response:
 
 
 @app.get("/api/cards/{card_id}/photo")
-def get_card_photo(card_id: int, user: dict = Depends(current_user_for_media)):
-    """Serve the studio photo of one of the user's cards."""
-    return _card_photo_response(card_id, owner_id=user["user_id"])
+def get_card_photo(card_id: int, download: bool = False, user: dict = Depends(current_user_for_media)):
+    """Serve the picture of one of the user's cards (`?download=1` to save it as a file)."""
+    return _card_photo_response(card_id, owner_id=user["user_id"], download=download)
 
 
 # ---------------------------------------------------------------------------
-# Poster studio: render posters, manage the seller's branding
+# Pictures with text: edit the copy, render, fix the lettering. The seller's branding.
 # ---------------------------------------------------------------------------
-class PosterRequest(BaseModel):
-    layout: Optional[str] = None
-    aspect: Optional[str] = None
-    palette: Optional[str] = None
-    brand_color: Optional[str] = None
-    lang: Optional[str] = None
-    title: Optional[str] = None
-    price: Optional[str] = None
-    old_price: Optional[str] = None
-    bullets: Optional[List[str]] = Field(default=None, max_length=8)
-    badge_text: Optional[str] = None
-    deadline: Optional[str] = None
-    contact: Optional[str] = None
-    cta: Optional[str] = None
-    brand_name: Optional[str] = None
-    show_logo: Optional[bool] = None
-
-
 class BrandRequest(BaseModel):
     brand_name: str = ""
     brand_color: str = ""
     brand_contact: str = ""
 
 
-def _info_poster_config(info: dict, brand: dict, desired_price: Optional[float], lang: str) -> dict:
-    """The exact-text alternative of an information card: the same facts on a server-drawn "callouts" poster."""
-    bullets = list(info.get("benefits") or []) + [f"{s['name']}: {s['value']}" for s in (info.get("specs") or [])]
-    return PosterSpec.from_dict({
-        "layout": "callouts", "aspect": "3:4",
-        "palette": "custom" if brand["brand_color"] else "brand", "brand_color": brand["brand_color"],
-        "lang": lang, "title": info.get("title", ""), "bullets": bullets[:4],
-        "price": format_price(desired_price, lang), "contact": brand["brand_contact"], "brand_name": brand["brand_name"],
-        "show_logo": bool(brand["brand_logo"]),
-    }).to_dict()
-
-
-def _open_image(ref: Optional[str]):
-    """Open a stored picture (file reference or legacy inline data URL) as a PIL image, or None."""
-    import base64
-    import io
-    from PIL import Image
-
-    if not ref:
-        return None
-    try:
-        path = resolve_photo(ref)
-        if path:
-            img = Image.open(path)
-        elif ref.startswith("data:") and "," in ref:
-            img = Image.open(io.BytesIO(base64.b64decode(ref.split(",", 1)[1])))
-        else:
-            return None
-        img.load()
-        return img
-    except Exception as exc:
-        logger.warning("Could not open stored picture: %s", exc)
-        return None
-
-
-async def _render_card_poster(card: dict, config: dict) -> bytes:
-    """Render a card's poster off the event loop: AI scene if there is one, else the seller's own photo."""
-    import asyncio
-
-    spec = PosterSpec.from_dict(config)
-    brand_logo = get_brand(card["user_id"])["brand_logo"] if card.get("user_id") else None
-
-    def work() -> bytes:
-        background = _open_image(card.get("studio_photo_url"))
-        source = None if background is not None else _open_image(card.get("source_photo_url"))
-        logo = _open_image(brand_logo) if spec.show_logo else None
-        return poster_to_png(render_poster(spec, background=background, source=source, logo=logo))
-
-    return await asyncio.get_running_loop().run_in_executor(None, work)
-
-
-@app.post("/api/cards/{card_id}/poster")
-async def render_and_save_poster(card_id: int, req: PosterRequest, user: dict = Depends(current_user)):
-    """Draw the poster from the edited text and save the settings. No AI call: editing is free."""
-    card = get_card_for_poster(card_id, user["user_id"])
-    if not card:
-        raise HTTPException(status_code=404, detail="Card not found")
-    limit_error = check_user_limit("poster_render", user["user_id"], req.lang or card.get("lang") or "ru")
-    if limit_error:
-        raise HTTPException(status_code=429, detail=limit_error)
-    config = PosterSpec.from_dict(req.model_dump(exclude_none=True)).to_dict()
-    png = await _render_card_poster(card, config)
-    set_card_poster_config(card_id, user["user_id"], config)
-    log_event(event_type="poster_render", lang=config["lang"], is_mock=True, details={"card_id": card_id, "layout": config["layout"]}, user_id=user["user_id"])
-    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
-
-
-@app.get("/api/cards/{card_id}/poster.png")
-async def get_card_poster(card_id: int, user: dict = Depends(current_user_for_media)):
-    """The saved poster of one of the user's cards (for <img> tags and the history)."""
-    import json
-
-    card = get_card_for_poster(card_id, user["user_id"])
-    if not card or not card.get("poster_config"):
-        raise HTTPException(status_code=404, detail="Poster not found")
-    png = await _render_card_poster(card, json.loads(card["poster_config"]))
-    return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, max-age=60"})
-
-
-class InfoSpecItem(BaseModel):
+class SpecItem(BaseModel):
     name: str = ""
     value: str = ""
 
 
-class InfoRequest(BaseModel):
+class CopyRequest(BaseModel):
+    """Either `copy` (the seller's own text: it is only cleaned and cut to the format, no AI call) or nothing
+    (the AI writes the text again from the stored photo and notes)."""
+    model_config = {"populate_by_name": True}
+
+    copy_: Optional[dict] = Field(default=None, alias="copy")
+    style: Optional[str] = None
+    lang: Optional[str] = None
+    info_text: Optional[str] = Field(default=None, max_length=1500)
+
+
+class RenderRequest(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    copy_: Optional[dict] = Field(default=None, alias="copy")
+    style: Optional[str] = None
+    aspect: Optional[str] = None
+    lang: Optional[str] = None
+    # Field names of the previous /info-photo API (one release of backward compatibility)
     title: Optional[str] = None
     tagline: Optional[str] = None
     benefits: Optional[List[str]] = Field(default=None, max_length=8)
-    specs: Optional[List[InfoSpecItem]] = Field(default=None, max_length=8)
+    specs: Optional[List[SpecItem]] = Field(default=None, max_length=8)
     badge: Optional[str] = None
     uses: Optional[List[str]] = Field(default=None, max_length=8)
-    style: Optional[str] = None
-    lang: Optional[str] = None
 
 
-@app.post("/api/cards/{card_id}/info-photo")
-async def regenerate_info_photo(card_id: int, req: InfoRequest, user: dict = Depends(current_user)):
-    """Draw the information card again with the seller's edited text (and optionally another template)."""
-    card = get_card_for_poster(card_id, user["user_id"])
+class TextProblem(BaseModel):
+    expected: str = Field(default="", max_length=120)
+    found: str = Field(default="", max_length=200)
+
+
+class FixTextRequest(BaseModel):
+    problems: Optional[List[TextProblem]] = Field(default=None, max_length=12)
+
+
+def _text_card(card_id: int, user: dict, style: Optional[str] = None) -> tuple:
+    """(card, style, stored text) of one of the user's cards that carries text; 404 / 400 otherwise."""
+    from services.database import card_text
+
+    card = get_card(card_id, user["user_id"])
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    style = req.style if req.style in STYLES_BY_ID else card.get("photoshoot_style")
+    style = style if style in STYLES_BY_ID else card.get("photoshoot_style")
     if style_kind(style) != "ai_text":
-        raise HTTPException(status_code=400, detail="This card is not an information card")
-    lang = req.lang or card.get("lang") or "ru"
+        raise HTTPException(status_code=400, detail="This style has no text on the picture")
+    return card, style, card_text(card.get("info_config"))
+
+
+def _require_ai(lang: Optional[str]) -> None:
     if ai_service.is_mock or global_ai_budget_exhausted():
-        raise HTTPException(status_code=503, detail="AI is not available right now. Use the exact-text version.")
+        raise HTTPException(status_code=503, detail=_msg(TEXT_RENDER_UNAVAILABLE, lang))
+
+
+def _render_response(card_id: int, style: str, aspect: str, rendered: dict) -> dict:
+    version = int(datetime.now().timestamp())
+    url = _photo_url(card_id, version)
+    return {
+        "id": card_id, "photo_url": url, "studio_photo_url": url, "copy": rendered["copy"],
+        "verification": rendered["verification"], "photoshoot_style": style, "aspect": aspect, "version": version,
+        "image_calls": rendered.get("image_calls"),
+    }
+
+
+@app.post("/api/cards/{card_id}/copy")
+async def card_copy(card_id: int, req: CopyRequest, user: dict = Depends(current_user)):
+    """The text for a picture, before anything is drawn (cheap: at most one text call, never an image call).
+
+    With `copy` in the body the seller's text is cleaned and cut to the format's slots and limits (no AI).
+    Without it the AI writes the text again from the stored photo and the seller's notes."""
+    card, style, stored = _text_card(card_id, user, req.style)
+    lang = req.lang or card.get("lang") or "ru"
+    if req.copy_ is not None:
+        raw = {**req.copy_, "lang": lang}
+        return {"copy": apply_slots(CopySpec.from_dict(raw), style).to_dict(), "too_long": too_long_fields(req.copy_, style),
+                "photoshoot_style": style}
+
+    _require_ai(lang)
+    source = resolve_photo(card.get("source_photo_url"))
+    reservation = take_reservation("card_copy", user["user_id"], lang)
+    delivered = False
+    try:
+        brand, _logo = await run_blocking(_brand_for_ai, user["user_id"])
+        result = await ai_service.generate_product_card(
+            image_bytes=(await run_blocking(source.read_bytes)) if source else None, image_mime="image/jpeg",
+            cost_price=card.get("cost_price"), desired_price=card.get("desired_price"), note=card.get("note"), lang=lang,
+            photoshoot_style=style, content_tone=card.get("content_tone") or "luxury",
+            content_format=card.get("content_format") or "instagram", generate_photo=False,
+            info_text=req.info_text or "", brand=brand,
+        )
+        if result.get("ai_fallback") or not isinstance(result.get("copy"), dict):
+            raise HTTPException(status_code=503, detail=_msg(TEXT_RENDER_UNAVAILABLE, lang))
+        delivered = True
+    finally:
+        finish_reservation(reservation, delivered)
+    log_event(event_type="card_copy", lang=lang, is_mock=False, details={"card_id": card_id, "style": style}, user_id=user["user_id"])
+    return {"copy": result["copy"], "too_long": [], "photoshoot_style": style}
+
+
+async def _render_card_endpoint(card_id: int, req: RenderRequest, user: dict) -> dict:
+    card, style, stored = _text_card(card_id, user, req.style)
+    lang = req.lang or card.get("lang") or "ru"
+    _require_ai(lang)
     source = resolve_photo(card.get("source_photo_url"))
     if not source:
         raise HTTPException(status_code=409, detail="The original photo of this card is no longer stored")
+    aspect = pick_aspect(style, req.aspect or stored.get("aspect"))
+    if req.copy_ is not None:
+        raw_copy = dict(req.copy_)
+    elif any(v is not None for v in (req.title, req.tagline, req.benefits, req.specs, req.badge, req.uses)):
+        raw_copy = {"title": req.title, "tagline": req.tagline, "benefits": req.benefits, "badge": req.badge, "uses": req.uses,
+                    "specs": [s.model_dump() for s in (req.specs or [])]}
+    else:
+        raw_copy = dict(stored.get("copy") or {})
+    copy = CopySpec.from_dict({**raw_copy, "lang": lang})
+    if not copy.title:
+        raise HTTPException(status_code=400, detail="The title is empty")
 
-    spec = InfoSpec.from_dict({**req.model_dump(exclude_none=True), "specs": [s.model_dump() for s in (req.specs or [])], "lang": lang})
     reservation = take_reservation("generate_card", user["user_id"], lang)
     delivered = False
     try:
-        info = await ai_service.generate_info_photo(await run_blocking(source.read_bytes), "image/jpeg", style, spec)
-        if not info["photo_url"]:
-            raise HTTPException(status_code=502, detail="The picture could not be generated. Try again.")
-        photo_url = info.pop("photo_url")
-        config = {**spec.to_dict(), **info}
-        poster_cfg = _info_poster_config(config, get_brand(user["user_id"]), card.get("desired_price"), lang)
+        brand, logo = await run_blocking(_brand_for_ai, user["user_id"])
+        rendered = await ai_service.render_card(copy, style, aspect, await run_blocking(source.read_bytes), brand=brand, logo=logo)
+        if not rendered["photo"]:
+            # No server-drawn substitute: an honest error, the text stays in the editor
+            raise HTTPException(status_code=503, detail=_msg(TEXT_RENDER_UNAVAILABLE, lang))
+        from services.imaging import to_data_url
+
+        info_config = {"copy": rendered["copy"], "verification": rendered["verification"], "aspect": aspect}
         try:
-            old_photo = await run_blocking(update_card_info, card_id, user["user_id"], photo_url, config, poster_cfg, style)
+            old_photo = await run_blocking(update_card_render, card_id, user["user_id"], to_data_url(rendered["photo"]), info_config, style)
         except LookupError:
             raise HTTPException(status_code=404, detail="Card not found")
         except Exception:
@@ -1005,8 +1011,78 @@ async def regenerate_info_photo(card_id: int, req: InfoRequest, user: dict = Dep
         finish_reservation(reservation, delivered)
     if old_photo:
         delete_photo(old_photo)
-    log_event(event_type="generate_card", lang=lang, is_mock=False, details={"card_id": card_id, "style": style, "regenerated": True}, user_id=user["user_id"])
-    return {"studio_photo_url": photo_url, "info": config, "poster": poster_cfg, "photoshoot_style": style}
+    log_event(
+        event_type="generate_card", lang=lang, is_mock=False,
+        details={"card_id": card_id, "style": style, "aspect": aspect, "regenerated": True,
+                 "verified": rendered["verification"].get("verified"), "image_calls": rendered.get("image_calls")},
+        user_id=user["user_id"],
+    )
+    return _render_response(card_id, style, aspect, rendered)
+
+
+@app.post("/api/cards/{card_id}/render")
+async def render_card(card_id: int, req: RenderRequest, user: dict = Depends(current_user)):
+    """Draw the picture of a card with the given (seller-approved) text, in any style that carries text."""
+    return await _render_card_endpoint(card_id, req, user)
+
+
+@app.post("/api/cards/{card_id}/info-photo", deprecated=True)
+async def regenerate_info_photo(card_id: int, req: RenderRequest, user: dict = Depends(current_user)):
+    """Alias of /render kept for one release (old clients send title/tagline/benefits/specs)."""
+    res = await _render_card_endpoint(card_id, req, user)
+    return {**res, "info": res["copy"]}
+
+
+@app.post("/api/cards/{card_id}/fix-text")
+async def fix_card_text(card_id: int, req: FixTextRequest, user: dict = Depends(current_user)):
+    """Correct only the lettering of the existing picture (one edit by the image model), keeping everything else.
+    By default the strings reported by the last check are fixed; the seller may name other lines."""
+    card, style, stored = _text_card(card_id, user)
+    lang = card.get("lang") or "ru"
+    _require_ai(lang)
+    picture = resolve_photo(card.get("studio_photo_url"))
+    if not picture or not stored.get("copy"):
+        raise HTTPException(status_code=409, detail="This card has no picture to correct yet")
+    problems = [p.model_dump() for p in (req.problems or [])] or list((stored.get("verification") or {}).get("problems") or [])
+    problems = [p for p in problems if (p.get("expected") or p.get("found"))]
+    if not problems:
+        raise HTTPException(status_code=400, detail="Nothing to fix: name the lines that are wrong")
+    aspect = pick_aspect(style, stored.get("aspect"))
+    copy = CopySpec.from_dict({**stored["copy"], "lang": lang})
+
+    reservation = take_reservation("generate_card", user["user_id"], lang)
+    delivered = False
+    try:
+        rendered = await ai_service.fix_card_text(await run_blocking(picture.read_bytes), problems, copy, style, aspect)
+        if not rendered["photo"]:
+            raise HTTPException(status_code=503, detail=_msg(TEXT_RENDER_UNAVAILABLE, lang))
+        from services.imaging import to_data_url
+
+        info_config = {"copy": rendered["copy"], "verification": rendered["verification"], "aspect": aspect}
+        try:
+            old_photo = await run_blocking(update_card_render, card_id, user["user_id"], to_data_url(rendered["photo"]), info_config, style)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="Card not found")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Could not save the card. Please try again.")
+        delivered = True
+    finally:
+        finish_reservation(reservation, delivered)
+    if old_photo:
+        delete_photo(old_photo)
+    log_event(event_type="generate_card", lang=lang, is_mock=False,
+              details={"card_id": card_id, "style": style, "fix_text": True, "verified": rendered["verification"].get("verified")},
+              user_id=user["user_id"])
+    return _render_response(card_id, style, aspect, rendered)
+
+
+@app.get("/api/cards/{card_id}/poster.png", deprecated=True)
+def old_poster_link_redirect(card_id: int, request: Request):
+    """Posters are ordinary pictures now: old links are permanently redirected to the card's photo."""
+    from fastapi.responses import RedirectResponse
+
+    query = f"?{request.url.query}" if request.url.query else ""
+    return RedirectResponse(url=f"/api/cards/{card_id}/photo{query}", status_code=301)
 
 
 def _brand_response(user_id: int) -> dict:

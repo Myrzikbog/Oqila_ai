@@ -153,7 +153,8 @@ def init_db(force: bool = False) -> None:
             except Exception:
                 pass
 
-            # Poster studio: seller branding (per user) and poster data (per card)
+            # Seller branding (per user) and the text of pictures (per card).
+            # poster_config is a leftover of the old server-drawn posters: kept empty, no longer read.
             for table, col, col_def in [
                 ("users", "brand_name", "TEXT"), ("users", "brand_color", "TEXT"),
                 ("users", "brand_contact", "TEXT"), ("users", "brand_logo", "TEXT"),
@@ -506,14 +507,12 @@ def save_generated_card(
     user_id: Optional[int] = None,
     is_demo: bool = False,
     source_photo_url: Optional[str] = None,
-    poster_config: Optional[Dict[str, Any]] = None,
     info_config: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Save a generated product card to the database for history with optional user_id."""
     try:
         hashtags_json = json.dumps(hashtags, ensure_ascii=False) if isinstance(hashtags, list) else (hashtags or "[]")
         studio_photo_url = store_photo(studio_photo_url)
-        poster_json = json.dumps(poster_config, ensure_ascii=False) if poster_config else None
         info_json = json.dumps(info_config, ensure_ascii=False) if info_config else None
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -522,13 +521,13 @@ def save_generated_card(
                 INSERT INTO generated_cards (
                     title, description, price_tag, hashtags, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id, is_demo, source_photo_url, poster_config, info_config
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    cost_price, desired_price, note, lang, user_id, is_demo, source_photo_url, info_config
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     title, description, price_tag, hashtags_json, marketing_tip,
                     studio_photo_url, photoshoot_style, content_tone, content_format,
-                    cost_price, desired_price, note, lang, user_id, 1 if is_demo else 0, source_photo_url, poster_json, info_json
+                    cost_price, desired_price, note, lang, user_id, 1 if is_demo else 0, source_photo_url, info_json
                 ),
             )
             conn.commit()
@@ -545,16 +544,21 @@ def _loads(raw: Optional[str]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _poster_fields(card_id: int, raw_config: Optional[str]) -> Dict[str, Any]:
-    """Poster info for API responses: the saved layout/text config and the URL that renders it."""
-    if not raw_config:
-        return {"has_poster": False, "poster_url": None, "poster_config": None}
-    try:
-        config = json.loads(raw_config)
-    except Exception:
-        config = None
-    return {"has_poster": bool(config), "poster_url": f"/api/cards/{card_id}/poster.png" if config else None,
-            "poster_config": config}
+def card_text(raw_info: Optional[str]) -> Dict[str, Any]:
+    """The text of a picture as stored with a card: {"copy", "verification", "aspect"} (all None for a card
+    without text). Rows written before the unified pipeline kept a flat info spec: they are read as well."""
+    from services.info_photo import CopySpec
+
+    data = _loads(raw_info)
+    if not isinstance(data, dict):
+        return {"copy": None, "verification": None, "aspect": None}
+    if isinstance(data.get("copy"), dict):
+        return {"copy": data["copy"], "verification": data.get("verification"), "aspect": data.get("aspect")}
+    verification = None
+    if data.get("verified") is not None:
+        verification = {"verified": bool(data["verified"]), "unexpected": list(data.get("unexpected") or []),
+                        "problems": [{"expected": m, "found": ""} for m in (data.get("missing") or [])]}
+    return {"copy": CopySpec.from_dict(data).to_dict(), "verification": verification, "aspect": data.get("aspect") or "3:4"}
 
 
 def get_history(
@@ -572,7 +576,7 @@ def get_history(
                 SELECT id, created_at, title, description, price_tag, hashtags,
                        marketing_tip, studio_photo_url, photoshoot_style,
                        content_tone, content_format, cost_price, desired_price,
-                       note, lang, is_favorite, user_id, poster_config, info_config
+                       note, lang, is_favorite, user_id, info_config, source_photo_url
                 FROM generated_cards
                 WHERE 1=1
             """
@@ -616,9 +620,8 @@ def get_history(
                     "lang": row["lang"],
                     "is_favorite": bool(row["is_favorite"]),
                     "user_id": row["user_id"],
-                    **_poster_fields(row["id"], row["poster_config"]),
-                    "poster_has_scene": bool(row["studio_photo_url"]),
-                    "info_config": _loads(row["info_config"]),
+                    **card_text(row["info_config"]),
+                    "has_source": bool(row["source_photo_url"]),
                 })
             return items
     except Exception as exc:
@@ -786,13 +789,13 @@ def remember_telegram_update(update_id: int) -> bool:
 
 
 # ===========================================================================
-# Poster studio: per-card poster data and per-user branding
+# Card pictures with text, and per-user branding
 # ===========================================================================
 
-def get_card_for_poster(card_id: int, user_id: Optional[int]) -> Optional[Dict[str, Any]]:
-    """Photo references and saved poster config of a card (user_id=None: any card, administrators only)."""
-    query = ("SELECT id, user_id, title, studio_photo_url, source_photo_url, poster_config, info_config, photoshoot_style, "
-             "desired_price, lang FROM generated_cards WHERE id = ?")
+def get_card(card_id: int, user_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    """One card with its photo references and stored text (user_id=None: any card, administrators only)."""
+    query = ("SELECT id, user_id, title, note, studio_photo_url, source_photo_url, info_config, photoshoot_style, "
+             "content_tone, content_format, cost_price, desired_price, lang FROM generated_cards WHERE id = ?")
     params: List[Any] = [card_id]
     if user_id is not None:
         query += " AND user_id = ?"
@@ -802,27 +805,13 @@ def get_card_for_poster(card_id: int, user_id: Optional[int]) -> Optional[Dict[s
             row = conn.execute(query, params).fetchone()
             return dict(row) if row else None
     except Exception as exc:
-        logger.error("Failed to load card %s for poster: %s", card_id, exc)
+        logger.error("Failed to load card %s: %s", card_id, exc)
         return None
 
 
-def set_card_poster_config(card_id: int, user_id: int, config: Dict[str, Any]) -> bool:
-    try:
-        with get_db_connection() as conn:
-            cur = conn.execute(
-                "UPDATE generated_cards SET poster_config = ? WHERE id = ? AND user_id = ?",
-                (json.dumps(config, ensure_ascii=False), card_id, user_id),
-            )
-            conn.commit()
-            return cur.rowcount > 0
-    except Exception as exc:
-        logger.error("Failed to save poster config: %s", exc)
-        return False
-
-
-def update_card_info(card_id: int, user_id: int, studio_photo_url: Optional[str], info_config: Dict[str, Any],
-                     poster_config: Optional[Dict[str, Any]] = None, style: Optional[str] = None) -> str:
-    """Replace a card's picture and info settings after a re-generation.
+def update_card_render(card_id: int, user_id: int, studio_photo_url: Optional[str], info_config: Dict[str, Any],
+                       style: Optional[str] = None) -> str:
+    """Replace a card's picture and its text after a new render.
 
     Returns the previous picture reference so the caller can delete the old file ("" if the picture did not change).
     Raises LookupError when the card does not exist or belongs to someone else, and re-raises database errors
@@ -837,14 +826,13 @@ def update_card_info(card_id: int, user_id: int, studio_photo_url: Optional[str]
         new_ref = store_photo(studio_photo_url) if studio_photo_url else row["studio_photo_url"]
         try:
             conn.execute(
-                "UPDATE generated_cards SET studio_photo_url = ?, info_config = ?, poster_config = COALESCE(?, poster_config), "
+                "UPDATE generated_cards SET studio_photo_url = ?, info_config = ?, "
                 "photoshoot_style = COALESCE(?, photoshoot_style) WHERE id = ? AND user_id = ?",
-                (new_ref, json.dumps(info_config, ensure_ascii=False),
-                 json.dumps(poster_config, ensure_ascii=False) if poster_config else None, style, card_id, user_id),
+                (new_ref, json.dumps(info_config, ensure_ascii=False), style, card_id, user_id),
             )
             conn.commit()
         except Exception as exc:
-            logger.error("Failed to update card info: %s", exc)
+            logger.error("Failed to update card %s: %s", card_id, exc)
             if new_ref != row["studio_photo_url"]:
                 delete_photo(new_ref)  # the new file would be an orphan
             raise
