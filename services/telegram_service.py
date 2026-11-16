@@ -39,6 +39,7 @@ from services.database import (
     upsert_user,
 )
 from services.legal_calc import calculate
+from services.legal_kb import kb
 
 logger = logging.getLogger("oqila_telegram")
 
@@ -65,14 +66,14 @@ DAILY_TIPS_RU = [
 TAX_CALENDAR_TEXT_UZ = (
     "📅 <b>O'zbekiston 2026 — YaTT va o'z-o'zini band qilganlar uchun soliq taqvimi:</b>\n\n"
     "📌 <b>Har oyning 15-sanasigacha:</b>\n"
-    "• YaTT majburiy ijtimoiy solig'i — kamida 1 BHM (440 000 so'm), joriy oy uchun (SK 408-modda).\n"
+    f"• YaTT majburiy ijtimoiy solig'i — kamida 1 BHM ({kb.fmt('brv')} so'm), joriy oy uchun (SK 408-modda).\n"
     "• Aylanmadan soliq (1%, SK 467-modda) — o'tgan oy uchun hisobot va to'lov (SK 470-modda).\n\n"
     "📌 <b>15-fevralgacha:</b>\n"
     "• Aylanmadan soliq bo'yicha yillik hisob-kitob.\n\n"
     "📌 <b>O'z-o'zini band qilganlar:</b>\n"
     "• Aylanmadan soliq — 1% (2026-yildan, 100 mln so'mgacha imtiyoz bekor qilingan).\n"
     "• Staj uchun ijtimoiy soliq — ixtiyoriy, yiliga kamida 1 BHM.\n\n"
-    "⚠️ <b>Yillik daromad 12 000 BHMdan (≈5,28 mlrd so'm) oshsa:</b>\n"
+    f"⚠️ <b>Yillik daromad {kb.fmt('threshold_brv')} BHMdan (≈{kb.fmt('threshold_uzs_bn')} mlrd so'm) oshsa:</b>\n"
     "QQS va foyda solig'iga majburiy o'tiladi (PF-100, 2026-yil 1-iyundan).\n\n"
     "<i>Muddatlarni soliq.uz saytida tekshiring.</i>"
 )
@@ -80,14 +81,14 @@ TAX_CALENDAR_TEXT_UZ = (
 TAX_CALENDAR_TEXT_RU = (
     "📅 <b>Узбекистан 2026 — налоговый календарь ЯТТ и самозанятых:</b>\n\n"
     "📌 <b>Каждый месяц до 15-го числа:</b>\n"
-    "• Обязательный соцналог ЯТТ — не менее 1 БРВ (440 000 сум) за текущий месяц (ст. 408 НК).\n"
+    f"• Обязательный соцналог ЯТТ — не менее 1 БРВ ({kb.fmt('brv')} сум) за текущий месяц (ст. 408 НК).\n"
     "• Налог с оборота (1%, ст. 467 НК) — отчёт и уплата за прошлый месяц (ст. 470 НК).\n\n"
     "📌 <b>До 15 февраля:</b>\n"
     "• Годовой расчёт по налогу с оборота.\n\n"
     "📌 <b>Самозанятые:</b>\n"
     "• Налог с оборота — 1% (с 2026 г., освобождение до 100 млн сум отменено).\n"
     "• Соцналог для стажа — добровольно, не менее 1 БРВ в год.\n\n"
-    "⚠️ <b>При годовом доходе свыше 12 000 БРВ (≈5,28 млрд сум):</b>\n"
+    f"⚠️ <b>При годовом доходе свыше {kb.fmt('threshold_brv')} БРВ (≈{kb.fmt('threshold_uzs_bn')} млрд сум):</b>\n"
     "обязательный переход на НДС и налог на прибыль (УП-100, с 1 июня 2026 г.).\n\n"
     "<i>Сверяйте сроки на soliq.uz.</i>"
 )

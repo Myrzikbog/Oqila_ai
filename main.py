@@ -40,8 +40,15 @@ from services.session_service import (
     verify_session_token,
 )
 from services.database import (
+    add_legal_message,
     clear_history,
+    create_legal_chat,
     delete_history_item,
+    delete_legal_chat,
+    get_latest_legal_chat,
+    get_legal_chat,
+    get_legal_feedback,
+    save_legal_feedback,
     get_admin_cards,
     get_admin_dashboard_metrics,
     get_admin_events,
@@ -76,6 +83,10 @@ from services.media_storage import delete_photo, resolve_photo, store_bytes
 from services.info_photo import CopySpec, apply_slots, too_long_fields
 from services.presets import STYLES_BY_ID, pick_aspect, public_registry, style_kind
 from services.imaging import ImageRejected, normalize_logo, normalize_source
+from services.legal_ai import refusal as legal_refusal, run_legal
+from services.legal_faq import get_faq
+from services.legal_kb import kb as legal_kb
+from services.legal_safety import classify as classify_question
 from services.rate_limit import (
     LimitExceeded,
     check_user_limit,
@@ -212,9 +223,17 @@ class CalcRequest(BaseModel):
 
 
 class LegalQARequest(BaseModel):
+    """The profile is read from the database, never from the request: nothing the client sends reaches the prompt
+    except the question itself."""
     question: str
     lang: str = "ru"
-    user_profile: Optional[dict] = None
+    chat_id: Optional[int] = None
+
+
+class LegalFeedbackRequest(BaseModel):
+    message_id: int
+    rating: int
+    comment: str = Field(default="", max_length=500)
 
 
 class SetWebhookRequest(BaseModel):
@@ -1333,40 +1352,133 @@ def legal_steps(lang: str = "ru"):
     return JSONResponse(content={"steps": steps})
 
 
+LEGAL_SUGGESTIONS = {
+    "ru": {
+        "self_employed": ["Можно ли мне продавать на Uzum?", "Сколько налога я заплачу с продажи?", "Когда платить налог?"],
+        "yatt": ["Когда платить соцналог ЯТТ?", "Сколько налога я заплачу с продажи?", "Какой порог оборота для НДС?"],
+        "planning": ["Что выбрать: самозанятость или ЯТТ?", "Как открыть ЯТТ?", "Сколько стоит ЭЦП?"],
+        "default": ["Что выбрать: самозанятость или ЯТТ?", "Когда платить налог с оборота?", "Нужна ли касса (ККМ)?"],
+    },
+    "uz": {
+        "self_employed": ["Uzumda sota olamanmi?", "Sotuvdan qancha soliq to'layman?", "Soliqni qachon to'layman?"],
+        "yatt": ["YaTT ijtimoiy solig'ini qachon to'layman?", "Sotuvdan qancha soliq to'layman?", "QQS uchun aylanma chegarasi qancha?"],
+        "planning": ["Nimani tanlay: o'z-o'zini band qilishmi yoki YaTT?", "YaTT ni qanday ochaman?", "ERI qancha turadi?"],
+        "default": ["Nimani tanlay: o'z-o'zini band qilishmi yoki YaTT?", "Aylanma solig'ini qachon to'layman?", "Kassa (NKM) kerakmi?"],
+    },
+}
+LEGAL_RESELL_SUGGESTION = {"ru": "Нужен ли ЯТТ для перепродажи из Китая?", "uz": "Xitoydan qayta sotish uchun YaTT kerakmi?"}
+
+
 @app.post("/api/legal-qa")
 async def legal_qa(req: LegalQARequest, user: dict = Depends(current_user)):
-    """AI-powered legal Q&A for Uzbekistan business questions."""
-    if not req.question or len(req.question.strip()) < 3:
+    """Structured answer of the legal assistant (see services/legal_ai.py), with a saved conversation.
+
+    The profile comes from the database; the answer has the shape {short_answer, steps, documents, where_to_go,
+    deadlines, costs, risks, sources, follow_up_questions, confidence, escalate, escalate_reason}."""
+    question = (req.question or "").strip()
+    if len(question) < 3:
         raise HTTPException(status_code=400, detail="Question too short")
-    if len(req.question) > 4000:
+    if len(question) > 4000:
         raise HTTPException(status_code=413, detail="Question too long")
+    lang = "uz" if req.lang == "uz" else "ru"
+    user_id = user["user_id"]
 
-    reservation = take_reservation("legal_qa", user["user_id"], req.lang)
-    reason: Optional[str] = "error"
-    try:
-        use_mock = ai_service.is_mock or global_ai_budget_exhausted()
-        answer, reason = await ai_service.legal_qa(
-            question=req.question,
-            lang=req.lang,
-            user_profile=req.user_profile,
-            force_mock=use_mock,
-        )
-    finally:
-        finish_reservation(reservation, reason is None)
+    if req.chat_id is not None:
+        chat = await run_blocking(get_legal_chat, req.chat_id, user_id)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        chat_id, history = chat["id"], chat["messages"]
+    else:
+        chat_id, history = await run_blocking(create_legal_chat, user_id, question[:60]), []
 
+    kind = classify_question(question, has_history=bool(history))
+    if kind in ("evasion", "offtopic"):
+        result = legal_refusal(kind, lang)  # a deterministic answer: no model call, no quota
+    else:
+        reservation = take_reservation("legal_qa", user_id, lang)
+        result = None
+        try:
+            result = await run_legal(
+                ai_service, question, lang, profile={"status": user.get("status"), "category": user.get("category"), "sales_channel": user.get("sales_channel")},
+                history=history, force_mock=global_ai_budget_exhausted(),
+            )
+        finally:
+            finish_reservation(reservation, bool(result and result.fallback is None))
+
+    def save() -> int:
+        add_legal_message(chat_id, "user", {"text": question})
+        content = {**result.answer, "used_tools": result.used_tools, "conflict": result.conflict, "calc_warning": result.calc_warning}
+        return add_legal_message(chat_id, "assistant", content, result.sources, is_mock=result.fallback is not None)
+
+    message_id = await run_blocking(save)
     log_event(
-        event_type="legal_qa",
-        lang=req.lang,
-        is_mock=reason is not None,  # what actually happened, not what was planned
-        details={
-            "question": req.question[:120],
-            "has_profile": req.user_profile is not None,
-            "ai_fallback": reason,
-        },
-        user_id=user["user_id"],
+        event_type="legal_qa", lang=lang, is_mock=result.fallback is not None,
+        details={"question": question[:120], "ai_fallback": result.fallback, "kind": kind, "tools": result.used_tools,
+                 "confidence": result.answer.get("confidence"), "conflict": result.conflict, "chat_id": chat_id},
+        user_id=user_id,
     )
+    return {"chat_id": chat_id, "message_id": message_id, "answer": result.answer, "sources": result.sources,
+            "used_tools": result.used_tools, "ai_fallback": result.fallback, "conflict": result.conflict, "calc_warning": result.calc_warning}
 
-    return JSONResponse(content={"answer": answer, "ai_fallback": reason})
+
+@app.get("/api/legal-chats/latest")
+def latest_legal_chat(user: dict = Depends(current_user)):
+    """The user's most recent conversation (or an empty one), so the tab continues where it was left."""
+    return get_latest_legal_chat(user["user_id"]) or {"id": None, "title": "", "messages": []}
+
+
+@app.get("/api/legal-chats/{chat_id}")
+def get_legal_chat_endpoint(chat_id: int, user: dict = Depends(current_user)):
+    chat = get_legal_chat(chat_id, user["user_id"])
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+@app.delete("/api/legal-chats/{chat_id}")
+def delete_legal_chat_endpoint(chat_id: int, user: dict = Depends(current_user)):
+    if not delete_legal_chat(chat_id, user["user_id"]):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"status": "ok", "deleted_id": chat_id}
+
+
+@app.post("/api/legal-feedback")
+def legal_feedback(req: LegalFeedbackRequest, user: dict = Depends(current_user)):
+    """👍 / 👎 under an answer; visible to administrators."""
+    if req.rating == 0:
+        raise HTTPException(status_code=400, detail="rating must be 1 or -1")
+    if not save_legal_feedback(req.message_id, user["user_id"], req.rating, req.comment):
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"status": "ok"}
+
+
+@app.get("/api/legal-suggestions")
+def legal_suggestions(lang: str = "ru", user: dict = Depends(current_user)):
+    """Starting questions chosen by the user's profile."""
+    lang = "uz" if lang == "uz" else "ru"
+    pack = LEGAL_SUGGESTIONS[lang]
+    items = list(pack.get(user.get("status") or "", pack["default"]))
+    if user.get("category") == "resale" and user.get("status") != "yatt":
+        items[0] = LEGAL_RESELL_SUGGESTION[lang]
+    return {"suggestions": items}
+
+
+@app.get("/api/legal-faq")
+def legal_faq_endpoint(lang: str = "ru"):
+    """The FAQ of the legal tab; its numbers come from the knowledge base."""
+    return {"items": get_faq(lang)}
+
+
+@app.get("/api/legal-kb")
+def legal_kb_endpoint(lang: str = "ru"):
+    """The verified legal facts with their check dates and sources."""
+    return {"facts": legal_kb.public(lang), "allowed_domains": legal_kb.allowed_domains}
+
+
+@app.get("/api/admin/legal-feedback")
+def admin_legal_feedback(limit: int = 100, offset: int = 0, admin_auth: bool = Security(verify_admin_key)):
+    """Ratings of legal answers and the knowledge-base facts that are due for a re-check."""
+    return {"feedback": get_legal_feedback(limit, offset), "stale_facts": legal_kb.stale(90)}
 
 
 # ---------------------------------------------------------------------------

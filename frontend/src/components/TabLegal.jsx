@@ -20,446 +20,14 @@ import {
   Clock,
   Banknote,
   AlertTriangle,
-  CheckCircle2,
   RotateCcw
 } from 'lucide-react';
 import { hapticImpact, hapticNotify } from '../utils/telegram';
+import { apiFetch } from '../utils/api';
+import LegalAnswerCard from './legal/LegalAnswerCard';
 
-// ---------------------------------------------------------------------------
-// Static FAQ Data (Official Uzbekistan Procedures 2025-2026)
-// ---------------------------------------------------------------------------
-
-const FAQ_RU = [
-  {
-    id: 'ecert',
-    icon: KeyRound,
-    color: 'violet',
-    title: 'Как получить ЭЦП (электронную цифровую подпись / E-IMZO)?',
-    badge: '7% БРВ • Необходима для ЯТТ',
-    timeline: '10–15 минут онлайн',
-    fee: '≈7% БРВ = ~30 800 сум (для физлиц, точная сумма — при оплате)',
-    steps: [
-      'Зайдите на официальный портал e-imzo.uz и скачайте программный модуль E-IMZO для вашей системы (Windows/macOS/Android/iOS).',
-      'Установите и запустите модуль E-IMZO. Нажмите «Получить сертификат ключа ЭЦП».',
-      'Введите серию и номер паспорта / ID-карты и дату рождения.',
-      'Пройдите биометрическую идентификацию Face ID со смартфона или обратитесь лично в Центр государственных услуг (ЦГУ).',
-      'После подтверждения личности система сформирует счёт на оплату (около 7% БРВ, ~30 800 сум; точная сумма показывается при оплате). Оплатите через Click, Payme или Apelsin.',
-      'Сертификат ключа ЭЦП генерируется онлайн и сохраняется в виде защищённого файла .pfx с вашим паролем на срок 2 года.',
-      'ЭЦП физлица используется для авторизации на fo.birdarcha.uz (открытие ЯТТ), my.gov.uz, my.soliq.uz и подписания оферты Uzum Market.',
-    ],
-    links: [
-      { label: 'e-imzo.uz — Портал E-IMZO', url: 'https://e-imzo.uz' },
-      { label: 'my.gov.uz — Госуслуги', url: 'https://my.gov.uz' },
-    ],
-    law: 'Закон Республики Узбекистан «Об электронной цифровой подписи» (№ ЗРУ-793 от 12.10.2022)',
-    tip: '💡 ЭЦП платная: около 7% БРВ (~30 800 сум) для физических лиц и около 10% БРВ для юрлиц и ЯТТ. С 2026 года при первичном получении ID-карты ЭЦП создаётся бесплатно. Ключ действует 2 года.',
-  },
-  {
-    id: 'yatt',
-    icon: Building2,
-    color: 'amber',
-    title: 'Как открыть ЯТТ (Индивидуальный предприниматель)?',
-    badge: 'Обязательно для торговли и перепродажи',
-    timeline: '15–30 минут онлайн',
-    fee: '0.9 БРВ = ~396 000 сум (со скидкой онлайн 10%)',
-    steps: [
-      'Убедитесь в наличии действующего ключа ЭЦП (E-IMZO).',
-      'Перейдите на автоматизированную систему регистрации бизнеса fo.birdarcha.uz или на my.gov.uz.',
-      'Авторизуйтесь с помощью ЭЦП, выберите пункт «Государственная регистрация индивидуального предпринимателя».',
-      'Заполните анкету: укажите домашний адрес (место жительства), телефон и e-mail.',
-      'Выберите код вида экономической деятельности (ОКЭД): для интернет-торговли и Uzum — 47.91 («Розничная торговля по почте или через Интернет»), для розничного магазина/рынка — 47.11 или 47.19.',
-      'Оплатите государственную пошлину через Click, Payme или банковскую карту: онлайн — 0,9 БРВ (396 000 сум), в Центре госуслуг — 1 БРВ.',
-      'Свидетельство о государственной регистрации ЯТТ с уникальным QR-кодом формируется моментально в личном кабинете.',
-    ],
-    links: [
-      { label: 'fo.birdarcha.uz — Единый портал регистрации бизнеса', url: 'https://fo.birdarcha.uz' },
-      { label: 'my.gov.uz — Регистрация через Госуслуги', url: 'https://my.gov.uz' },
-    ],
-    law: 'Порядок государственной регистрации субъектов предпринимательства (ПКМ № 66 от 09.02.2017; Закон «О гарантиях свободы предпринимательской деятельности» в ред. ЗРУ-328)',
-    tip: '⚠️ Если вы закупаете товары (Китай, 1688, Taobao, оптовые рынки) для перепродажи — открывайте ЯТТ. С 2026 года обычная розничная торговля исключена из перечня самозанятых (УП-50), а Uzum принимает самозанятых только с товарами собственного производства.',
-  },
-  {
-    id: 'self_employed',
-    icon: UserCheck,
-    color: 'emerald',
-    title: 'Как оформить самозанятость (O\'z-o\'zini band qilish)?',
-    badge: 'Только для хэндмейда, пошива и услуг',
-    timeline: '5 минут через мобильное приложение',
-    fee: 'Бесплатно (0 сум)',
-    steps: [
-      'Скачайте мобильное приложение «Soliq» из App Store или Google Play.',
-      'Авторизуйтесь по номеру телефона, пройдите биометрическую идентификацию Face ID.',
-      'В меню выберите «O\'z-o\'zini band qilish» (Регистрация самозанятых).',
-      'Выберите вид деятельности из перечня: с 1 января 2026 года в нём 72 пункта (Указ № УП-50). Например, пошив, ремёсла, домашняя выпечка, репетиторство. Парикмахерские и косметологические услуги, фото- и видеосъёмка и обычная розничная торговля из перечня исключены.',
-      'Подтвердите данные — электронная справка с QR-кодом формируется моментально.',
-      'Скачайте справку самозанятого: она является официальным документом для открытия бизнес-карт, работы с клиентами и выхода на Uzum Market со своей продукцией.',
-    ],
-    links: [
-      { label: 'my.soliq.uz — Портал налоговых услуг', url: 'https://my.soliq.uz' },
-      { label: 'soliq.uz/mobile — Мобильное приложение Soliq', url: 'https://soliq.uz/mobile' },
-    ],
-    law: 'Постановление Президента РУз № ПП-4742 от 08.06.2020; Указ Президента № УП-50 от 19.03.2025 (перечень видов деятельности с 01.01.2026)',
-    tip: '💡 Главные правила самозанятости: 1) С 1 января 2026 года налог с оборота — 1% с первого сума (Закон № ЗРУ-1108); 2) Соцналог — добровольно не менее 1 БРВ (440 000 сум) в год для стажа; 3) Нанимать сотрудников по трудовому договору нельзя; 4) Обычная розничная торговля исключена из перечня; продажа на электронных площадках разрешена (п. 33), но Uzum требует товары собственного производства.',
-  },
-  {
-    id: 'uzum',
-    icon: ShoppingBag,
-    color: 'purple',
-    title: 'Как стать продавцом на Uzum Market? (ЯТТ vs Самозанятый)',
-    badge: 'Электронная коммерция',
-    timeline: '2–4 рабочих дня',
-    fee: 'Регистрация бесплатная (комиссия по тарифам Uzum, примерно 8–15%)',
-    steps: [
-      'ОПРЕДЕЛИТЕСЬ С ВАШИМ СТАТУСОМ:',
-      '• Если вы производите товар сами (хэндмейд, пошив, ремесло) — можно продавать на Uzum как самозанятый. Документы: паспорт, QR-справка из Soliq, личная сумовая карта.',
-      '• Если вы перепродаёте товары (Китай, оптовые закупки, электроника, одежда чужих фабрик) — по правилам Uzum нужен ЯТТ или ООО. Документы: свидетельство ЯТТ, паспорт, расчётный счёт в банке.',
-      'Зайдите на seller.uzum.uz и подайте заявку на открытие магазина.',
-      'Загрузите подтверждающие документы и подпишите электронный договор оферты.',
-      'Uzum работает по договору комиссии (продавец — комитент, Uzum — комиссионер): выручку и налог с оборота учитывайте со всей суммы продажи, а комиссию — как свой расход.',
-      'Создайте карточки товаров, упакуйте партию по регламенту Uzum и передайте на склад маркетплейса.',
-    ],
-    links: [
-      { label: 'seller.uzum.uz — Портал для продавцов Uzum', url: 'https://seller.uzum.uz' },
-      { label: 'partner.uzum.uz — База знаний Uzum', url: 'https://partner.uzum.uz' },
-    ],
-    law: 'Закон Республики Узбекистан «Об электронной коммерции» (№ ЗРУ-792 от 29.09.2022); Налоговый кодекс РУз (ст. 467 в ред. ЗРУ-1108)',
-    tip: '⚡ Ставка налога с оборота для ЯТТ и самозанятых — 1%. Uzum налог за вас не удерживает: вы платите его сами со всей суммы продажи ежемесячно до 15 числа. Выплаты от Uzum поступают на расчётный счёт (ЯТТ) или банковскую карту (самозанятые).',
-  },
-  {
-    id: 'bank_account',
-    icon: Building2,
-    color: 'sky',
-    title: 'Как открыть банковский счёт для бизнеса в Узбекистане?',
-    badge: 'Онлайн за 1–3 дня',
-    timeline: '1–3 рабочих дня онлайн',
-    fee: 'Открытие: 0 сум; обслуживание: 0–50 000 сум/мес',
-    steps: [
-      'РАЗНИЦА МЕЖДУ ЯТТ И САМОЗАНЯТЫМИ:',
-      '• ДЛЯ САМОЗАНЯТЫХ: отдельный расчетный счет юрлица НЕ ТРЕБУЕТСЯ! Вы можете принимать оплату на любую личную сумовую карту (Uzcard/Humo) или открыть удобную «бизнес-карту самозанятого» в Kapitalbank, Anorbank, TBC, Agrobank.',
-      '• ДЛЯ ЯТТ: отдельный расчётный счёт (20208...) обычно нужен для оптовых закупок, эквайринга Click/Payme и торговли на маркетплейсах — уточните требования банка и площадки.',
-      'Как открыть счёт ЯТТ онлайн: скачайте бизнес-приложение выбранного банка (например, Kapitalbank Business, Anor Business, Ipoteka-Retail).',
-      'Загрузите скан паспорта / ID-карты и свидетельство о регистрации ЯТТ из fo.birdarcha.uz (ИНН подтягивается автоматически).',
-      'Пройдите видеоидентификацию в приложении банка — счёт активируется за 1–3 рабочих дня.',
-      'Получите выписку с реквизитами (20-значный счёт 20208..., МФО банка, ИНН) — эти данные указываются в договоре с Uzum Market и эквайрингом.',
-    ],
-    links: [
-      { label: 'kapitalbank.uz — Kapitalbank Business', url: 'https://kapitalbank.uz' },
-      { label: 'anorbank.uz — Anorbank Business', url: 'https://anorbank.uz' },
-    ],
-    law: 'Инструкция Центрального банка РУз о порядке открытия, ведения и закрытия банковских счетов (рег. МЮ № 3420 от 08.02.2023)',
-    tip: '💡 Деньги от продаж на маркетплейсах и через эквайринг Click/Payme зачисляются на ваш банковский счёт. Доход ЯТТ облагается налогом с оборота; порядок вывода средств на личную карту уточните в своём банке.',
-  },
-  {
-    id: 'hunarmand',
-    icon: Award,
-    color: 'rose',
-    title: 'Как получить сертификат Хунарманд (мастера-ремесленника)?',
-    badge: 'Льготы для ремесленников',
-    timeline: '7–14 рабочих дней',
-    fee: 'Вступительный и членский взнос в ассоциацию',
-    steps: [
-      'Проверьте, входит ли ваше направление в официальный перечень видов ремесленнической деятельности (керамика, резьба по дереву, чеканка, вышивка сюзане, национальный текстиль, ювелирное дело).',
-      'Подготовьте портфолио: качественные фотографии ваших изделий, описание техники изготовления, сертификаты об участии в выставках (при наличии).',
-      'Подайте онлайн-заявление на членство через сайт hunarmand.uz или обратитесь в районное отделение ассоциации «Хунарманд».',
-      'Экспертный совет оценит художественную и ремесленную ценность ваших работ.',
-      'После одобрения и оплаты членского взноса вам выдаётся официальное свидетельство члена ассоциации «Хунарманд».',
-      'Членство даёт доступ к льготам для ремесленников (льготные кредиты, участие в ярмарках и др.). Действующие налоговые льготы уточните в ассоциации и на soliq.uz.',
-    ],
-    links: [
-      { label: 'hunarmand.uz — Сайт «Хунарманд»', url: 'https://hunarmand.uz' },
-    ],
-    law: 'Указ Президента РУз № УП-5242 от 17.11.2017 «О мерах по дальнейшему развитию ремесленничества и всемерной поддержке ремесленников»',
-    tip: '✨ С 2026 года налоги для ЯТТ и самозанятых изменились (ЗРУ-1108), поэтому прежние льготы ремесленников могли измениться — перед расчётами уточните их в ассоциации «Хунарманд» и на soliq.uz.',
-  },
-  {
-    id: 'kkm',
-    icon: Receipt,
-    color: 'teal',
-    title: 'Нужна ли онлайн-касса (Онлайн-ККМ) и чек покупателю?',
-    badge: 'Фискальные чеки',
-    timeline: '1–2 дня',
-    fee: 'Бесплатно со смартфона (Soliq QR) или аренда кассы',
-    steps: [
-      'По правилам каждый расчет с покупателем (наличными или картой) обязан сопровождаться выдачей фискального чека.',
-      'САМЫЙ ПРОСТОЙ СПОСОБ ДЛЯ ЯТТ: используйте бесплатную функцию «Виртуальная касса / Soliq QR» в мобильном приложении «Soliq». Вы вбиваете сумму продажи со смартфона — формируется электронный фискальный чек с QR-кодом.',
-      'ДЛЯ ТОРГОВЛИ В INSTAGRAM/TELEGRAM: при подключении Click Merchant или Payme Business фискальные чеки формируются АВТОМАТИЧЕСКИ через интеграцию с ОФД при каждой онлайн-оплате.',
-      'ДЛЯ СТАЦИОНАРНОГО МАГАЗИНА: приобретите или возьмите в аренду онлайн-ККМ у аккредитованного ЦТО, зарегистрируйте её через my.soliq.uz.',
-      'САМОЗАНЯТЫЕ: чек можно сформировать в приложении Soliq; требования к кассе для своего вида деятельности уточните на soliq.uz.',
-    ],
-    links: [
-      { label: 'my.soliq.uz — Регистрация онлайн-ККМ', url: 'https://my.soliq.uz' },
-      { label: 'soliq.uz/mobile — Приложение Soliq', url: 'https://soliq.uz/mobile' },
-    ],
-    law: 'Порядок применения онлайн-ККМ и системы виртуальной кассы (ПКМ № 943 от 23.11.2019)',
-    tip: '💡 За невыдачу чека или неприменение кассовой техники предусмотрены штрафы. Работайте открыто: используйте бесплатный QR-чек в приложении Soliq или Click/Payme.',
-  },
-  {
-    id: 'taxes_overview',
-    icon: Banknote,
-    color: 'indigo',
-    title: 'Сколько и когда платить налоги? Налоговый календарь ЯТТ и самозанятых',
-    badge: 'Налоговый кодекс РУз (1%)',
-    timeline: 'Ежемесячно до 15-го числа',
-    fee: '1 БРВ соцналог + 1% от выручки',
-    steps: [
-      '📌 1. ЕЖЕМЕСЯЧНО ДО 15 ЧИСЛА СЛЕДУЮЩЕГО МЕСЯЦА — налог с оборота 1%:',
-      '   • С 1 января 2026 года (Закон № ЗРУ-1108, ст. 467 НК) ставка для ЯТТ и самозанятых — 1%; закон установил её для дохода до 1 млрд сум в год;',
-      '   • Налог считается со всей выручки; отчёт и уплата — до 15 числа месяца, следующего за отчётным (ст. 470 НК);',
-      '   • При продажах через Uzum налог тоже платите вы сами, со всей суммы продажи.',
-      '📌 2. ЕЖЕМЕСЯЧНО ДО 15 ЧИСЛА — социальный налог ЯТТ:',
-      '   • Не менее 1 БРВ (440 000 сум) за текущий месяц, обязательно для ЯТТ (ст. 408 ч. 1 НК).',
-      '📌 3. ДО 15 ФЕВРАЛЯ — годовой расчёт по налогу с оборота.',
-      '⚠️ ПОРОГ 12 000 БРВ (≈5,28 МЛРД СУМ): с 1 июня 2026 года при доходе свыше 12 000 БРВ в год — обязательный переход на НДС и налог на прибыль (Указ № УП-100). Прежний порог 1 млрд сум больше не применяется.',
-      '💡 САМОЗАНЯТЫЕ: налог с оборота — 1% с первого сума (освобождение до 100 млн сум отменено с 01.01.2026). Соцналог — добровольно не менее 1 БРВ в год для стажа.',
-    ],
-    links: [
-      { label: 'my.soliq.uz — Оплата налогов онлайн', url: 'https://my.soliq.uz' },
-    ],
-    law: 'Налоговый кодекс Республики Узбекистан (ст. 467, 470, 408, ред. ЗРУ-1108); Указ № УП-100 от 26.05.2026',
-    tip: '📱 Оплачивать налоги удобнее всего онлайн: в приложении Soliq или через мобильный банкинг (Click, Payme, Apelsin) по ИНН за 1 минуту.',
-  },
-  {
-    id: 'click_payme',
-    icon: FileText,
-    color: 'sky',
-    title: 'Как подключить Click и Payme для приёма оплат онлайн?',
-    badge: 'Эквайринг 1.5%',
-    timeline: '1–3 рабочих дня',
-    fee: 'Комиссия 1.5% с успешного платежа',
-    steps: [
-      'CLICK MERCHANT: зайдите на click.uz → «Для бизнеса» → «Подключить Click Merchant». Заполните электронную заявку (потребуются: свидетельство ЯТТ / справка самозанятого, паспорт, банковские реквизиты).',
-      'PAYME BUSINESS: перейдите на business.payme.uz, создайте личный кабинет мерчанта и загрузите документы.',
-      'СПОСОБЫ ПРИЁМА ОПЛАТ:',
-      '• Платежная ссылка (Инвойс): создавайте ссылку на оплату прямо в кабинете Click/Payme и отправляйте клиенту в Telegram/Instagram;',
-      '• QR-код на кассе: распечатайте статичный QR-код мерчанта для оффлайн-точки;',
-      '• Интеграция в Telegram-бот: подключите платежный API Click/Payme для автоматической оплаты в боте.',
-      'Деньги зачисляются на ваш банковский счёт на следующий рабочий день.',
-      'Каждая операция через Click/Payme автоматически фискализируется в налоговых органах — чек выбивается автоматически.',
-    ],
-    links: [
-      { label: 'click.uz — Подключение Click Merchant', url: 'https://click.uz' },
-      { label: 'business.payme.uz — Личный кабинет Payme', url: 'https://business.payme.uz' },
-    ],
-    law: 'Закон Республики Узбекистан «О платежах и платежных системах»',
-    tip: '💡 Для продаж через Telegram или Instagram проще всего использовать платежные ссылки Click Merchant: покупатель нажимает на ссылку, оплачивает картой Uzcard/Humo/Visa, а вам и клиенту мгновенно приходит электронный чек.',
-  },
-];
-
-const FAQ_UZ = [
-  {
-    id: 'ecert',
-    icon: KeyRound,
-    color: 'violet',
-    title: 'ERI (Elektron raqamli imzo / E-IMZO) kalitini qanday olish mumkin?',
-    badge: '7% BHM • YaTT uchun majburiy',
-    timeline: '10–15 daqiqa onlayn',
-    fee: '≈7% BHM = ~30 800 so\'m (jismoniy shaxslar uchun, aniq summa to\'lovda ko\'rinadi)',
-    steps: [
-      'Rasmiy e-imzo.uz portaliga kiring va operatsion tizimingiz (Windows/macOS/Android/iOS) uchun E-IMZO modulini yuklab oling.',
-      'Modulni o\'rnating va «ERI kalitini olish» bo\'limini tanlang.',
-      'Pasport yoki ID-karta seriyasi, raqami hamda tug\'ilgan sanangizni kiriting.',
-      'Smartfoningiz orqali Face ID (biometrik qiyofani aniqlash)dan o\'ting yoki Davlat xizmatlari markaziga (DXM) shaxsan murojaat qiling.',
-      'Ma\'lumotlar tasdiqlangach, tizim to\'lov hisobini shakllantiradi (taxminan 7% BHM, ~30 800 so\'m; aniq summa to\'lovda ko\'rinadi). Click, Payme yoki Apelsin orqali onlayn to\'lanadi.',
-      'ERI sertifikati parolingiz bilan himoyalangan .pfx fayli ko\'rinishida 2 yil muddatga beriladi.',
-      'Jismoniy shaxs ERIsi fo.birdarcha.uz, my.gov.uz, my.soliq.uz portallariga kirish va YaTT ochish uchun xizmat qiladi.',
-    ],
-    links: [
-      { label: 'e-imzo.uz — Rasmiy E-IMZO portali', url: 'https://e-imzo.uz' },
-      { label: 'my.gov.uz — Davlat xizmatlari portali', url: 'https://my.gov.uz' },
-    ],
-    law: 'O‘zbekiston Respublikasining «Elektron raqamli imzo to‘g‘risida»gi Qonuni (O‘RQ-793, 12.10.2022)',
-    tip: '💡 ERI pullik: jismoniy shaxslar uchun taxminan 7% BHM (~30 800 so\'m), yuridik shaxslar va YaTT uchun taxminan 10% BHM. 2026-yildan ID-karta birinchi marta olinganda ERI bepul yaratiladi. Kalit 2 yil amal qiladi.',
-  },
-  {
-    id: 'yatt',
-    icon: Building2,
-    color: 'amber',
-    title: 'YaTT (Yakka tartibdagi tadbirkor) qanday ochiladi?',
-    badge: 'Savdo va qayta sotish uchun majburiy',
-    timeline: '15–30 daqiqa onlayn',
-    fee: '0.9 BHM = ~396 000 so\'m (onlayn 10% chegirma)',
-    steps: [
-      'Amaldagi ERI (E-IMZO) kalitingiz borligiga ishonch hosil qiling.',
-      'fo.birdarcha.uz yagona biznesni ro\'yxatdan o\'tkazish portaliga yoki my.gov.uz saytiga kiring.',
-      'ERI orqali tizimga kirib, «Yakka tartibdagi tadbirkorni davlat ro\'yxatidan o\'tkazish» xizmatini tanlang.',
-      'Yashash manzilingiz, telefon raqamingiz va elektron pochtangizni kiriting.',
-      'Faoliyat turi (IFUT/OKED) kodini tanlang: internet orqali savdo va Uzum uchun — 47.91 («Pochta yoki Internet orqali chakana savdo»), bozor yoki do\'konda savdo uchun — 47.11 yoki 47.19.',
-      'Davlat bojini Click, Payme yoki bank kartasi orqali to\'lang: onlayn — 0,9 BHM (396 000 so\'m), Davlat xizmatlari markazida — 1 BHM.',
-      'To\'lov amalga oshirilishi bilanoq QR-kodli elektron YaTT guvohnomasi shaxsiy kabinetingizda tayyor bo\'ladi.',
-    ],
-    links: [
-      { label: 'fo.birdarcha.uz — Biznesni ro\'yxatdan o\'tkazish portali', url: 'https://fo.birdarcha.uz' },
-      { label: 'my.gov.uz — Yagona interaktiv davlat xizmatlari', url: 'https://my.gov.uz' },
-    ],
-    law: 'Tadbirkorlik subyektlarini davlat ro‘yxatidan o‘tkazish tartibi (VMQ № 66, 09.02.2017; O‘RQ-328 tahriridagi «Tadbirkorlik faoliyati erkinligining kafolatlari to‘g‘risida»gi Qonun)',
-    tip: '⚠️ Tovarlarni qayta sotish uchun olsangiz (Xitoy, 1688, Taobao, ulgurji bozorlar) — YaTT oching. 2026-yildan oddiy chakana savdo o\'z-o\'zini band qilganlar ro\'yxatidan chiqarilgan (PF-50), Uzum esa o\'z-o\'zini band qilganlarni faqat o\'zi ishlab chiqargan mahsulot bilan qabul qiladi.',
-  },
-  {
-    id: 'self_employed',
-    icon: UserCheck,
-    color: 'emerald',
-    title: 'O\'z-o\'zini band qilish qanday rasmiylashtiriladi?',
-    badge: 'Faqat handmade, tikuvchilik va xizmatlar uchun',
-    timeline: '5 daqiqa (mobil ilovada)',
-    fee: 'Mutlaqo bepul (0 so\'m)',
-    steps: [
-      'App Store yoki Google Play orqali rasmiy «Soliq» mobil ilovasini yuklab oling.',
-      'Telefon raqamingiz orqali kiring va Face ID biometrik tekshiruvidan o\'ting.',
-      'Menyudan «O\'z-o\'zini band qilish» xizmatini tanlang.',
-      'Ro\'yxatdan faoliyat turini tanlang: 2026-yil 1-yanvardan unda 72 ta band bor (PF-50-son Farmon). Masalan, tikuvchilik, hunarmandchilik, uyda pishiriqlar, repetitorlik. Sartaroshlik va kosmetologiya xizmatlari, foto va videosuratga olish hamda oddiy chakana savdo ro\'yxatdan chiqarilgan.',
-      'Ma\'lumotlarni tasdiqlang — QR-kodli elektron ma\'lumotnoma darhol shakllanadi.',
-      'Ma\'lumotnomani yuklab oling: u bankda biznes-karta ochish, mijozlar va Uzum Market bilan ishlash uchun rasmiy hujjat hisoblanadi.',
-    ],
-    links: [
-      { label: 'my.soliq.uz — Elektron soliq xizmatlari', url: 'https://my.soliq.uz' },
-      { label: 'soliq.uz/mobile — Soliq mobil ilovasi', url: 'https://soliq.uz/mobile' },
-    ],
-    law: 'O‘zbekiston Respublikasi Prezidentining PQ-4742-son qarori (08.06.2020); PF-50-son Farmoni (19.03.2025, 2026-yil 1-yanvardan faoliyat turlari ro‘yxati)',
-    tip: '💡 Asosiy qoidalar: 1) 2026-yil 1-yanvardan aylanmadan soliq — birinchi so\'mdan 1% (O\'RQ-1108); 2) Ijtimoiy soliq: staj uchun ixtiyoriy, yiliga kamida 1 BHM; 3) Mehnat shartnomasi bilan ishchi yollash mumkin emas; 4) Oddiy chakana savdo ro\'yxatdan chiqarilgan; elektron maydonchalarda sotish mumkin (33-band), ammo Uzum o\'zi ishlab chiqargan mahsulotni talab qiladi.',
-  },
-  {
-    id: 'uzum',
-    icon: ShoppingBag,
-    color: 'purple',
-    title: 'Uzum Market\'da sotuvchi qanday bo\'lish mumkin? (YaTT vs O\'z-o\'zini band qilgan)',
-    badge: 'Elektron tijorat',
-    timeline: '2–4 ish kuni',
-    fee: 'Ro\'yxatdan o\'tish bepul (komissiya Uzum tariflari bo\'yicha, taxminan 8–15%)',
-    steps: [
-      'MAQOMINGIZNI ANQLANG:',
-      '• Agar mahsulotni o\'zingiz ishlab chiqarsangiz (handmade, tikuvchilik, kiyim, shirinliklar) — Uzum Market\'da o\'z-o\'zini band qilgan shaxs sifatida sotishingiz mumkin. Hujjatlar: pasport, Soliq QR-ma\'lumotnomasi, shaxsiy so\'m kartasi.',
-      '• Agar tovarlarni qayta sotsangiz (Xitoy, fabrika, ulgurji bozor tovarlari) — Uzum qoidalariga ko\'ra YaTT yoki MChJ kerak. Hujjatlar: YaTT guvohnomasi, pasport, bankdagi hisobvaraq.',
-      'seller.uzum.uz saytiga o\'ting va sotuvchi hisobini ochish uchun ariza topshiring.',
-      'Kerakli hujjatlarni yuklab, oferta shartnomasini imzolang.',
-      'Uzum komissiya shartnomasi asosida ishlaydi (sotuvchi — komitent, Uzum — komissioner): tushum va aylanmadan soliqni sotuvning to\'liq summasidan hisoblang, komissiyani esa xarajat sifatida.',
-      'Mahsulot kartochkalarini to\'ldirib, Uzum qoidalariga ko\'ra qadoqlang va omborga topshiring.',
-    ],
-    links: [
-      { label: 'seller.uzum.uz — Uzum sotuvchilar portali', url: 'https://seller.uzum.uz' },
-      { label: 'partner.uzum.uz — Sotuvchilar uchun qo\'llanma', url: 'https://partner.uzum.uz' },
-    ],
-    law: 'O‘zbekiston Respublikasining «Elektron tijorat to‘g‘risida»gi Qonuni (O‘RQ-792, 29.09.2022); Soliq kodeksi (467-modda, O\'RQ-1108)',
-    tip: '⚡ YaTT va o\'z-o\'zini band qilganlar uchun aylanmadan soliq stavkasi — 1%. Uzum soliqni siz uchun ushlab qolmaydi: uni sotuvning to\'liq summasidan har oy 15-sanagacha o\'zingiz to\'laysiz. Tushumlar YaTT hisobvarag\'iga yoki o\'z-o\'zini band qilgan shaxsning kartasiga tushadi.',
-  },
-  {
-    id: 'bank_account',
-    icon: Building2,
-    color: 'sky',
-    title: 'Biznes uchun bankda hisobvaraq qanday ochiladi?',
-    badge: '1–3 kunda onlayn',
-    timeline: '1–3 ish kuni onlayn',
-    fee: 'Ochish: 0 so\'m; xizmat ko\'rsatish: 0–50 000 so\'m/oy',
-    steps: [
-      'YaTT VA O\'Z-O\'ZINI BAND QILGANLAR O\'RTASIDAGI FARQ:',
-      '• O\'Z-O\'ZINI BAND QILGANLAR: alohida yuridik hisobvaraq ochish SHART EMAS! Har qanday shaxsiy so\'m kartangizdan (Uzcard/Humo) yoki banklarda o\'z-o\'zini band qiluvchilar uchun maxsus biznes-kartadan foydalanishingiz mumkin.',
-      '• YaTT UCHUN: alohida 20208... hisobvarag\'i odatda ulgurji xaridlar, Click/Payme ekvayring va marketpleyslar uchun kerak bo\'ladi — bank va maydoncha talablarini aniqlang.',
-      'YaTT hisobvarag\'ini onlayn ochish: tanlangan bankning biznes ilovasini yuklab oling (masalan, Kapitalbank Business, Anor Business, Ipoteka-Retail).',
-      'Pasport/ID-karta va fo.birdarcha.uz\'dan olingan YaTT guvohnomasini yuklang (STIR avtomatik ravishda tekshiriladi).',
-      'Ilovada video-identifikatsiyadan o\'ting — hisobvaraq 1–3 ish kunida faollashadi.',
-      '20 xonali hisob raqami (20208...), MFO va STIR rekvizitlarini oling — bu ma\'lumotlar Uzum Market va ekvayring shartnomalariga kiritiladi.',
-    ],
-    links: [
-      { label: 'kapitalbank.uz — Kapitalbank biznes hisob', url: 'https://kapitalbank.uz' },
-      { label: 'anorbank.uz — Anorbank onlayn biznes', url: 'https://anorbank.uz' },
-    ],
-    law: 'O‘zbekiston Respublikasi Markaziy bankining Bank hisobvaraqlarini ochish, yuritish va yopish tartibi to‘g‘risidagi yo‘riqnomasi (AV ro‘yxat № 3420, 08.02.2023)',
-    tip: '💡 YaTT daromadi aylanmadan soliqqa tortiladi; mablag\'ni shaxsiy kartangizga o\'tkazish tartibini bankingizdan aniqlang.',
-  },
-  {
-    id: 'hunarmand',
-    icon: Award,
-    color: 'rose',
-    title: 'Hunarmand sertifikati qanday olinadi?',
-    badge: 'Hunarmandlar uchun imtiyozlar',
-    timeline: '7–14 ish kuni',
-    fee: 'Assotsiatsiyaga kirish va a\'zolik badali',
-    steps: [
-      'Faoliyatingiz xalq hunarmandchiligining rasmiy ro\'yxatiga (kulolchilik, yog\'och o\'ymakorligi, zardo\'zlik, milliy liboslar, so\'zana, zargarlik) kirishini tekshiring.',
-      'Portfolio tayyorlang: buyumlaringizning sifatli fotosuratlari, tayyorlash uslubi va ko\'rgazmalardagi ishtirok sertifikatlari (mavjud bo\'lsa).',
-      'hunarmand.uz veb-sayti orqali arizani onlayn yuboring yoki tuman «Hunarmand» uyushmasiga shaxsan boring.',
-      'Ekspertlar kengashi buyumlaringizning badiiy va amaliy qimmatini baholaydi.',
-      'A\'zolik tasdiqlanib, badal to\'langandan so\'ng «Hunarmand» uyushmasi a\'zolik guvohnomasi beriladi.',
-      'A\'zolik hunarmandlar uchun imtiyozlardan (imtiyozli kreditlar, yarmarkalarda ishtirok va boshqalar) foydalanish imkonini beradi. Amaldagi soliq imtiyozlarini uyushma va soliq.uz orqali aniqlang.',
-    ],
-    links: [
-      { label: 'hunarmand.uz — «Hunarmand» uyushmasi', url: 'https://hunarmand.uz' },
-    ],
-    law: 'O‘zbekiston Respublikasi Prezidentining PF-5242-son Farmoni (17.11.2017) — hunarmandchilikni yanada rivojlantirish va hunarmandlarni har tomonlama qo‘llab-quvvatlash chora-tadbirlari to‘g‘risida',
-    tip: '✨ 2026-yildan YaTT va o\'z-o\'zini band qilganlar soliqlari o\'zgardi (O\'RQ-1108), shuning uchun hunarmandlarning avvalgi imtiyozlari o\'zgargan bo\'lishi mumkin — hisob-kitobdan oldin «Hunarmand» uyushmasi va soliq.uz orqali aniqlang.',
-  },
-  {
-    id: 'kkm',
-    icon: Receipt,
-    color: 'teal',
-    title: 'Onlayn-kassa (Onlayn-NKM) va xaridorga chek berish shartmi?',
-    badge: 'Fiskal cheklar',
-    timeline: '1–2 kun',
-    fee: 'Smartfonda bepul (Soliq QR) yoki kassa apparati',
-    steps: [
-      'Qonunchilikka ko\'ra, aholi bilan har bir naqd yoki plastik kartadagi hisob-kitobda xaridorga fiskal chek berilishi shart.',
-      'YaTT UCHUN ENG OSON YO\'L: «Soliq» ilovasida bepul «Virtual kassa / Soliq QR» xizmatidan foydalaning. Savdo summasini telefonga kiritasiz — QR-kodli elektron fiskal chek avtomatik shakllanadi.',
-      'TELEGRAM VA INSTAGRAMDA SAVDO UCHUN: Click Merchant yoki Payme Business ulanganda, onlayn to\'lov o\'tishi bilan fiskal chek OFD tizimi orqali avtomatik tarzda yaratiladi.',
-      'STATSIONAR DO\'KON UCHUN: akkreditatsiyadan o\'tgan markazlardan onlayn-NKM apparati xarid qiling yoki ijaraga olib, my.soliq.uz orqali ro\'yxatdan o\'tkazing.',
-      'O\'Z-O\'ZINI BAND QILGANLAR: chekni Soliq ilovasida chiqarish mumkin; faoliyat turingiz bo\'yicha kassa talablarini soliq.uz saytida aniqlang.',
-    ],
-    links: [
-      { label: 'my.soliq.uz — Onlayn-NKM ro\'yxatdan o\'tkazish', url: 'https://my.soliq.uz' },
-      { label: 'soliq.uz/mobile — Soliq mobil ilovasi', url: 'https://soliq.uz/mobile' },
-    ],
-    law: 'Onlayn nazorat-kassa mashinalari va virtual kassa tizimini qo‘llash tartibi (VMQ № 943, 23.11.2019)',
-    tip: '💡 Chek bermaslik yoki kassa texnikasini qo\'llamaslik uchun qonunda jarima belgilangan. Biznesingizni xavf ostiga qo\'ymang: «Soliq» ilovasidagi bepul QR-chekdan yoki Click/Payme integratsiyasidan foydalaning.',
-  },
-  {
-    id: 'taxes_overview',
-    icon: Banknote,
-    color: 'indigo',
-    title: 'Qancha va qachon soliq to\'lash kerak? YaTT va o\'z-o\'zini band qilganlar soliq kalendari',
-    badge: 'Soliq kodeksi (1%)',
-    timeline: 'Har oyning 15-sanasigacha',
-    fee: '1 BHM ijtimoiy soliq + 1% aylanmadan soliq',
-    steps: [
-      '📌 1. HAR OY KEYINGI OYNING 15-SANASIGACHA — 1% aylanmadan soliq:',
-      '   • 2026-yil 1-yanvardan (O\'RQ-1108-son qonun, SK 467-modda) YaTT va o\'z-o\'zini band qilganlar uchun stavka — 1%; qonun uni yiliga 1 mlrd so\'mgacha daromad uchun belgilagan;',
-      '   • Soliq butun tushumdan hisoblanadi; hisobot va to\'lov — hisobot oyidan keyingi oyning 15-sanasigacha (SK 470-modda);',
-      '   • Uzum orqali sotganda ham soliqni sotuvning to\'liq summasidan o\'zingiz to\'laysiz.',
-      '📌 2. HAR OYNING 15-SANASIGACHA — YaTT ijtimoiy solig\'i:',
-      '   • Joriy oy uchun kamida 1 BHM (440 000 so\'m), YaTT uchun majburiy (SK 408-modda 1-qism).',
-      '📌 3. 15-FEVRALGACHA — aylanmadan soliq bo\'yicha yillik hisob-kitob.',
-      '⚠️ 12 000 BHM CHEGARASI (≈5,28 MLRD SO\'M): 2026-yil 1-iyundan yillik daromad 12 000 BHMdan oshsa — QQS va foyda solig\'iga majburiy o\'tiladi (PF-100-son Farmon). Avvalgi 1 mlrd so\'m chegarasi endi qo\'llanilmaydi.',
-      '💡 O\'Z-O\'ZINI BAND QILGANLAR: aylanmadan soliq — birinchi so\'mdan 1% (100 mln so\'mgacha imtiyoz 2026-yildan bekor qilingan). Ijtimoiy soliq — staj uchun ixtiyoriy, yiliga kamida 1 BHM.',
-    ],
-    links: [
-      { label: 'my.soliq.uz — Soliqlarni onlayn to\'lash', url: 'https://my.soliq.uz' },
-    ],
-    law: 'O‘zbekiston Respublikasi Soliq kodeksi (467, 470, 408-moddalar, O\'RQ-1108); PF-100-son Farmon (26.05.2026)',
-    tip: '📱 Soliqlarni to\'lash juda oson: Soliq mobil ilovasida yoki Click/Payme ilovalarida STIR (INN) kiritilsa, hisoblangan soliqlar 1 daqiqada to\'lanadi.',
-  },
-  {
-    id: 'click_payme',
-    icon: FileText,
-    color: 'sky',
-    title: 'Click va Payme orqali to\'lov qabul qilishni qanday ulash mumkin?',
-    badge: 'Ekvayring 1.5%',
-    timeline: '1–3 ish kuni',
-    fee: 'Har muvaffaqiyatli to\'lovdan 1.5% komissiya',
-    steps: [
-      'CLICK MERCHANT: click.uz → «Biznes uchun» → «Click Merchant ulash» bo\'limiga o\'ting. Ariza to\'ldiring (YaTT guvohnomasi / o\'z-o\'zini band qilish ma\'lumotnomasi, pasport va bank rekvizitlari kerak bo\'ladi).',
-      'PAYME BUSINESS: business.payme.uz saytida ro\'yxatdan o\'tib, hujjatlarni yuklang.',
-      'TO\'LOV QABUL QILISH USULLARI:',
-      '• To\'lov havolasi (Invoys): shaxsiy kabinetda to\'lov linki yarating va Telegram/Instagram orqali xaridorga yuboring;',
-      '• QR-kod: do\'kon peshtaxtasiga chiqarib qo\'yish uchun statik QR-kod;',
-      '• Telegram-bot integratsiyasi: to\'lov API kalitlarini ulab, bot ichida to\'lovlarni avtomatlashtiring.',
-      'Mablag\'lar keyingi ish kunida to\'g\'ridan-to\'g\'ri bank hisobvarag\'ingizga tushadi.',
-      'Click va Payme har bir to\'lov bo\'yicha fiskal chekni OFDga avtomatik tarzda yuboradi — qo\'lda kassa urish shart emas.',
-    ],
-    links: [
-      { label: 'click.uz — Click Merchant ulash', url: 'https://click.uz' },
-      { label: 'business.payme.uz — Payme Business kabineti', url: 'https://business.payme.uz' },
-    ],
-    law: 'O‘zbekiston Respublikasining «To‘lovlar va to‘lov tizimlari to‘g‘risida»gi Qonuni',
-    tip: '💡 Telegram va Instagram do\'konlar uchun Click Merchant eng qulay: xaridorga to\'lov linki yuboriladi, u o\'z kartasi orqali to\'laydi va sizga ham, xaridorga ham avtomatik chek keladi.',
-  },
-];
+// The FAQ comes from the server (GET /api/legal-faq): its numbers are filled in from the legal knowledge base.
+const FAQ_ICONS = { KeyRound, Building2, UserCheck, Award, Receipt, ShoppingBag, FileText, Banknote };
 
 const BRAND_COLORS = {
   bg: 'bg-brand-50 dark:bg-teal-950',
@@ -477,84 +45,119 @@ const COLOR_MAP = new Proxy({}, { get: () => BRAND_COLORS });
 // ---------------------------------------------------------------------------
 import RichText from './RichText';
 
+/** A stored chat message of the server as a message of the UI. */
+function fromStored(m) {
+  if (m.role === 'user') return { role: 'user', text: m.content.text || '' };
+  return {
+    role: 'assistant', id: m.id, answer: m.content, sources: m.sources, fallback: m.is_mock,
+    conflict: m.content.conflict, calc_warning: m.content.calc_warning, rating: m.rating,
+  };
+}
+
 export default function TabLegal({ lang, t, profile, onOpenProfile }) {
-  const faqData = lang === 'uz' ? FAQ_UZ : FAQ_RU;
+  const [faqData, setFaqData] = useState([]);
+  const [faqError, setFaqError] = useState('');
   const [openId, setOpenId] = useState(null);
 
-  // Chat state — stored in component (persisted because App.jsx keeps this mounted)
-  const initMessage = {
+  // Greeting: shown by the UI only (the server never receives the user's name)
+  const greeting = {
     role: 'assistant',
     text: lang === 'uz'
       ? `Assalomu alaykum${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}! 👋 Men OqilaLegal — O'zbekiston qonunchiligi bo'yicha sun'iy intellekt maslahatchisiman.\n\n**Menga quyidagi mavzularda savol berishingiz mumkin:**\n• YaTT va o'z-o'zini band qilishni ochish\n• Soliqlar: stavkalar, miqdorlar, muddatlar\n• ERI (elektron imzo) olish\n• Click/Payme ulash\n• Uzum Market'da sotuvchi bo'lish\n• Hunarmand sertifikati\n\nSavolingizni yozing! ✍️`
       : `Здравствуйте${profile?.name ? `, ${profile.name.split(' ')[0]}` : ''}! 👋 Я OqilaLegal — AI-консультант по законодательству Узбекистана.\n\n**Задайте вопрос о:**\n• Открытии ЯТТ или самозанятости\n• Налогах: ставки, суммы, сроки\n• Получении ЭЦП (E-IMZO)\n• Подключении Click/Payme\n• Регистрации продавца на Uzum Market\n• Сертификате Хунарманд\n\nПишите — разберёмся вместе! ✍️`,
   };
 
-  const [messages, setMessages] = useState([initMessage]);
+  const [chatId, setChatId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isSending, setIsSending] = useState(false);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
+    let alive = true;
+    apiFetch(`/api/legal-faq?lang=${lang}`, { fallback: t.legal_faq_error })
+      .then((r) => r.json())
+      .then((data) => { if (alive) { setFaqData(data.items || []); setFaqError(''); } })
+      .catch((err) => { if (alive) setFaqError(err.message); });
+    apiFetch(`/api/legal-suggestions?lang=${lang}`, { fallback: '' })
+      .then((r) => r.json())
+      .then((data) => { if (alive) setSuggestions(data.suggestions || []); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [lang, t.legal_faq_error]);
+
+  // Continue where the conversation was left
+  useEffect(() => {
+    let alive = true;
+    apiFetch('/api/legal-chats/latest', { fallback: '' })
+      .then((r) => r.json())
+      .then((chat) => {
+        if (!alive || !chat.id) return;
+        setChatId(chat.id);
+        setMessages(chat.messages.map(fromStored));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isSending]);
 
-  const handleSend = useCallback(async (questionText) => {
-    const q = (questionText || inputValue).trim();
-    if (!q || isSending) return;
-
+  const sendQuestion = useCallback(async (q, { retryOf } = {}) => {
     hapticImpact('medium');
     setInputValue('');
-    setMessages((prev) => [...prev, { role: 'user', text: q }]);
+    setMessages((prev) => [...prev.filter((m) => m !== retryOf), ...(retryOf ? [] : [{ role: 'user', text: q }])]);
     setIsSending(true);
-
     try {
-      const res = await fetch('/api/legal-qa', {
+      const res = await apiFetch('/api/legal-qa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          question: q, 
-          lang, 
-          user_profile: profile 
-        }),
+        body: JSON.stringify({ question: q, lang, chat_id: chatId }),
+        timeout: 120000,
+        fallback: t.legal_error,
       });
-      const data = await res.json().catch(() => ({}));
-      // A 429 carries a localized "too many requests" message in `detail`
-      const fallback = lang === 'uz' ? "Kechirasiz, javob olishda xatolik." : "Ошибка при получении ответа.";
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', fallback: Boolean(data.answer && data.ai_fallback), text: data.answer || (typeof data.detail === 'string' ? `⏳ ${data.detail}` : fallback) }
-      ]);
+      const data = await res.json();
+      setChatId(data.chat_id);
+      setMessages((prev) => [...prev, {
+        role: 'assistant', id: data.message_id, answer: data.answer, sources: data.sources, fallback: Boolean(data.ai_fallback),
+        conflict: data.conflict, calc_warning: data.calc_warning, rating: null,
+      }]);
       hapticNotify('success');
     } catch (err) {
-      console.error(err);
+      setMessages((prev) => [...prev, { role: 'assistant', error: err.message || t.legal_error, retryQuestion: q }]);
       hapticNotify('error');
     } finally {
       setIsSending(false);
     }
-  }, [inputValue, isSending, lang, profile]);
+  }, [chatId, lang, t.legal_error]);
 
-  const clearChat = () => {
-    hapticImpact('medium');
-    setMessages([initMessage]);
+  const handleSend = (questionText) => {
+    const q = (questionText || inputValue).trim();
+    if (!q || isSending) return;
+    sendQuestion(q);
   };
 
-  const QUICK_QUESTIONS_RU = [
-    'Как открыть ЯТТ онлайн?',
-    'Сколько налогов платит ЯТТ?',
-    'Можно ли продавать китайские товары как самозанятый?',
-    'Как получить ЭЦП?',
-    'Нужна ли касса для Telegram-магазина?',
-  ];
+  const rateAnswer = async (message, rating) => {
+    try {
+      await apiFetch('/api/legal-feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message_id: message.id, rating }), fallback: '',
+      });
+      setMessages((prev) => prev.map((m) => (m === message ? { ...m, rating } : m)));
+    } catch { /* a missed rating is not worth an error screen */ }
+  };
 
-  const QUICK_QUESTIONS_UZ = [
-    'YaTT qanday ochiladi?',
-    'YaTT qancha soliq to\'laydi?',
-    'O\'z-o\'zini band qilgan Xitoy tovarini sota oladimi?',
-    'ERI qanday olinadi?',
-    'Telegram-do\'kon uchun kassa kerakmi?',
-  ];
+  const clearChat = async () => {
+    hapticImpact('medium');
+    const id = chatId;
+    setMessages([]);
+    setChatId(null);
+    if (id) apiFetch(`/api/legal-chats/${id}`, { method: 'DELETE', fallback: '' }).catch(() => {});
+  };
 
-  const quickQuestions = lang === 'uz' ? QUICK_QUESTIONS_UZ : QUICK_QUESTIONS_RU;
+  const lastAssistantIndex = messages.reduce((acc, m, i) => (m.role === 'assistant' && m.answer ? i : acc), -1);
+  const quickQuestions = messages.length === 0 ? suggestions : [];
 
   return (
     <div className="space-y-4">
@@ -601,8 +204,9 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
           </h3>
         </div>
 
+        {faqError && <p role="alert" className="text-xs font-semibold text-rose-700 dark:text-rose-300 px-1">{faqError}</p>}
         {faqData.map((item) => {
-          const Icon = item.icon;
+          const Icon = FAQ_ICONS[item.icon] || BookOpen;
           const colors = COLOR_MAP[item.color] || COLOR_MAP.teal;
           const isOpen = openId === item.id;
 
@@ -744,7 +348,8 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
               type="button"
               onClick={clearChat}
               title={lang === 'uz' ? 'Suhbatni tozalash' : 'Очистить чат'}
-              className="text-slate-400 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-white/10"
+              aria-label={lang === 'uz' ? 'Suhbatni tozalash' : 'Очистить чат'}
+              className="text-slate-300 hover:text-white transition-colors min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-white/10"
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
@@ -753,9 +358,16 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
 
         {/* Chat Messages */}
         <div className="p-3 space-y-3 max-h-80 overflow-y-auto bg-slate-50/40 dark:bg-slate-950/40">
+          {/* Greeting */}
+          <div className="flex items-start space-x-2">
+            <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-brand-100 dark:bg-brand-950 text-brand-800 dark:text-teal-300 border border-brand-200 dark:border-brand-800"><Bot className="w-3.5 h-3.5" /></div>
+            <div className="p-3 rounded-2xl max-w-[87%] text-xs leading-relaxed bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200/80 dark:border-slate-700 rounded-tl-sm shadow-sm">
+              <RichText text={greeting.text} />
+            </div>
+          </div>
           {messages.map((m, idx) => (
             <div
-              key={idx}
+              key={m.id ? `a${m.id}` : idx}
               className={`flex items-start space-x-2 ${m.role === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}
             >
               <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
@@ -766,19 +378,22 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                 {m.role === 'user' ? <User className="w-3.5 h-3.5" /> : <Bot className="w-3.5 h-3.5" />}
               </div>
 
-              <div className={`p-3 rounded-2xl max-w-[87%] text-xs leading-relaxed ${
+              <div className={`p-3 rounded-2xl text-xs leading-relaxed ${m.answer ? 'max-w-[94%] w-full' : 'max-w-[87%]'} ${
                 m.role === 'user'
                   ? 'bg-brand-700 text-white font-medium rounded-tr-sm shadow-sm'
                   : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200/80 dark:border-slate-700 rounded-tl-sm shadow-sm'
               }`}>
-                {/* No raw HTML: the user's own words are plain text, the answer gets only safe bold spans */}
-                {m.role === 'user'
-                  ? <div className="whitespace-pre-line">{m.text}</div>
-                  : <RichText text={m.text} />}
-                {m.fallback && (
-                  <p className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
-                    {lang === 'uz' ? "Bu shablon javob: AI hozir mavjud emas." : 'Это шаблонный ответ: ИИ сейчас недоступен.'}
-                  </p>
+                {/* No raw HTML: the user's words are plain text, the answer is rendered by LegalAnswerCard */}
+                {m.role === 'user' && <div className="whitespace-pre-line">{m.text}</div>}
+                {m.answer && (
+                  <LegalAnswerCard message={m} lang={lang} t={t} isLast={idx === lastAssistantIndex} onFollowUp={handleSend} onRate={rateAnswer} />
+                )}
+                {m.error && (
+                  <div className="space-y-2">
+                    <p role="alert" className="font-semibold text-rose-700 dark:text-rose-300">{m.error}</p>
+                    <button type="button" onClick={() => sendQuestion(m.retryQuestion, { retryOf: m })}
+                      className="min-h-11 px-4 rounded-xl bg-brand-700 text-white text-xs font-bold active:scale-95">{t.legal_retry}</button>
+                  </div>
                 )}
               </div>
             </div>

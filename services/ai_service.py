@@ -141,7 +141,7 @@ class AIService:
     Wraps Google Gemini API for:
       1. Multimodal product visual analysis & copywriting (gemini-2.5-flash)
       2. AI Studio Photoshoot generation (gemini-2.5-flash-image)
-      3. Legal Q&A (gemini-2.5-flash)
+      3. Nothing about law: the legal assistant lives in services/legal_ai.py and only uses `_generate` from here
     Falls back to mock data if GEMINI_API_KEY is absent, AI_MODE=mock, or any error occurs.
     """
 
@@ -269,140 +269,6 @@ class AIService:
     def demo_card(self, lang: str, desired_price: Optional[float] = None, note: Optional[str] = None) -> dict:
         """The built-in sample card of the "quick demo" button: no AI call, and openly a sample."""
         return self._mock_response(lang, None, desired_price, note)
-
-    # -----------------------------------------------------------------------
-    # Public: legal Q&A chat
-    # -----------------------------------------------------------------------
-    async def legal_qa(
-        self,
-        question: str,
-        lang: str = "ru",
-        user_profile: Optional[dict] = None,
-        force_mock: bool = False,
-    ) -> tuple:
-        """Answer a legal/business question about Uzbekistan regulations, personalized with user profile.
-
-        Returns (answer, fallback_reason): the reason is None for a real AI answer and "no_key" / "quota" / "error"
-        when the built-in template text is returned instead.
-        """
-        if self.is_mock or force_mock:
-            return self._mock_legal_answer(question, lang, user_profile), ("no_key" if self.is_mock else "quota")
-
-        lang_instruction = (
-            "Respond in Uzbek (O'zbek tili, lotin alifbosi)."
-            if lang == "uz"
-            else "Respond in Russian (Russian language)."
-        )
-
-        profile_section = ""
-        if user_profile:
-            status_map = {
-                "self_employed": "Самозанятая (O'z-o'zini band qilgan, 1% налог с оборота до 1 млрд сум)",
-                "yatt": "ЯТТ (Индивидуальный предприниматель / Yakka tartibdagi tadbirkor, 1% налог с оборота)",
-                "planning": "Планирует регистрацию / еще выбирает статус",
-            }
-            category_map = {
-                "sewing": "Пошив одежды / текстиль (Tikuvchilik)",
-                "crafts": "Хэндмейд / ремёсла (Hunarmandchilik)",
-                "food": "Домашняя кулинария / выпечка (Pazandachilik)",
-                "resale": "Торговля и перепродажа (товары из Китая, опт / Qayta sotish)",
-                "services": "Услуги / сервис (Xizmatlar)",
-            }
-            channel_map = {
-                "uzum": "Uzum Market",
-                "instagram": "Instagram / Соцсети",
-                "telegram": "Telegram",
-                "offline": "Офлайн-магазин / точка продаж",
-            }
-            u_name = str(user_profile.get("name") or "").strip() or "Предпринимательница"
-            u_first = (u_name.split() or ["Tadbirkor"])[0]
-            u_status = status_map.get(user_profile.get("status"), user_profile.get("status", "Не указан"))
-            u_cat = category_map.get(user_profile.get("category"), user_profile.get("category", "Не указана"))
-            u_chan = channel_map.get(user_profile.get("salesChannel"), user_profile.get("salesChannel", "Не указан"))
-
-            profile_section = f"""
-USER BUSINESS PROFILE (Use this to personalize your advice):
-- Имя/бренд: {u_name}
-- Текущий правовой статус: {u_status}
-- Ниша / деятельность: {u_cat}
-- Канал продаж: {u_chan}
-
-PERSONALIZATION RULES:
-- Address the user warmly by name ({u_first}) in your greeting.
-- Tailor legal and tax advice to their specific status, niche, and sales channel.
-- If they are self-employed and ask about reselling purchased goods (China, wholesale), explain that since 01.01.2026 ordinary retail trade is excluded from the self-employed list (УП-50), only retail sales on electronic trading platforms are allowed (item 33), and Uzum admits self-employed sellers only with their own products — so for reselling they should register as YaTT.
-- If they sell on Uzum Market, remind them that Uzum is a commission agent and does NOT withhold the tax: the seller pays the 1% turnover tax (ст. 467 НК РУз в ред. ЗРУ-1108) on the full sale amount by the 15th of the next month, and Uzum admits self-employed sellers only with their own products.
-- If they are in crafts/handmade, mention potential benefits of the «Hunarmand» association.
-"""
-
-        system_prompt = f"""You are OqilaLegal — an expert AI legal assistant specializing in
-Uzbekistan business law, tax regulations, and entrepreneurship for women.
-{lang_instruction}
-{profile_section}
-OFFICIAL LEGAL FRAMEWORK OF THE REPUBLIC OF UZBEKISTAN (checked against lex.uz / norma.uz / gov.uz publications, November 2026):
-
-1. НАЛОГ С ОБОРОТА — Закон № ЗРУ-1108 от 25.12.2025 г. (с 1 января 2026 г.):
-   - Ставка налога с оборота для ЯТТ и самозанятых — 1% (ст. 467 НК). Закон установил её для годового дохода до 1 млрд сум;
-     если пользователь спрашивает про доход выше 1 млрд сум, скажи, что ставку нужно уточнить на soliq.uz.
-   - Налог считается со всей выручки (расходы не вычитаются). Отчётный период — месяц, уплата до 15 числа следующего месяца (ст. 470 НК).
-   - Освобождение самозанятых при доходе до 100 млн сум отменено. Налог с оборота в фиксированной сумме отменён.
-   - По доходам самозанятых, полученным через цифровые платформы платёжных организаций, налог перечисляет платёжная организация (налоговый агент).
-   - Uzum Market НЕ удерживает налог за продавца: Uzum — комиссионер, продавец сам платит налог со всей суммы продажи (комиссия базу не уменьшает).
-
-2. ПОРОГ ОБЩЕГО РЕЖИМА — Указ № УП-100 от 26.05.2026 г. (с 1 июня 2026 г.):
-   - Обязательный переход на НДС и налог на прибыль — при доходе свыше 12 000 БРВ в год (≈5,28 млрд сум). Прежний порог 1 млрд сум больше не действует.
-
-3. САМОЗАНЯТОСТЬ — ПП-4742 от 08.06.2020 г. и Указ № УП-50 от 19.03.2025 г.:
-   - С 1 января 2026 г. перечень видов деятельности сокращён со 104 до 72 пунктов. Исключены, в частности, обычная розничная торговля,
-     парикмахерские и косметологические услуги, фото- и видеосъёмка. Разрешена розничная продажа на электронных торговых площадках (п. 33).
-   - Нанимать работников по трудовому договору нельзя.
-   - Uzum Market по своим правилам допускает самозанятых только с товарами собственного производства; для перепродажи вне маркетплейсов нужен ЯТТ или ООО.
-   - Социальный налог: добровольно не менее 1 БРВ в год для трудового стажа (ст. 408 ч. 2 НК).
-   - Не называй номера пунктов перечня, кроме п. 33, — советуй проверить свой вид деятельности в приложении Soliq.
-
-4. ЯТТ (индивидуальный предприниматель):
-   - Закон «О гарантиях свободы предпринимательской деятельности» (в ред. ЗРУ-328 от 02.05.2012 г.), регистрация — ПКМ № 66 от 09.02.2017 г.
-   - Регистрация онлайн через fo.birdarcha.uz или my.gov.uz с ЭЦП; госпошлина онлайн 0,9 БРВ, в Центре госуслуг 1 БРВ.
-   - Социальный налог: не менее 1 БРВ в месяц обязательно, до 15 числа текущего месяца (ст. 408 ч. 1 НК).
-
-5. БРВ = 440 000 сум с 1 сентября 2026 г. (Указ № УП-115 от 23.06.2026 г.).
-
-6. ЭЦП (E-IMZO) — Закон № ЗРУ-793 от 12.10.2022 г.:
-   - Платная: для физических лиц около 7% БРВ (≈30 800 сум), для юрлиц и ЯТТ около 10% БРВ; точная сумма показывается при оплате.
-   - С 2026 г. при первичном получении ID-карты ЭЦП создаётся бесплатно. Срок действия ключа — 2 года.
-
-7. ОНЛАЙН-ККМ И ЧЕКИ — ПКМ № 943 от 23.11.2019 г.: фискальный чек выдаётся через онлайн-ККМ, виртуальную кассу
-   или электронный чек платёжной системы. За торговлю без ККМ предусмотрены штрафы — не называй конкретную статью и суммы.
-
-8. ДРУГОЕ: ЗРУ-792 от 29.09.2022 г. «Об электронной коммерции»; ЗРУ-578 от 01.11.2019 г. «О платежах и платежных системах»;
-   Инструкция ЦБ о банковских счетах (рег. № 3420 от 08.02.2023 г.).
-   - Ассоциация «Хунарманд» (Указ № УП-5242 от 17.11.2017 г.): у членов есть льготы, но НЕ утверждай, что они освобождены
-     от налога с оборота, — советуй уточнить действующие льготы в ассоциации и на soliq.uz.
-   - Тарифы Uzum, Click и Payme — коммерческие условия, а не закон; называй их ориентировочными.
-
-If a question goes beyond these facts, say what is known, recommend checking soliq.uz, my.gov.uz or lex.uz, and do not invent article numbers, amounts or dates.
-
-Rules:
-- Give concise, practical, 100% legally grounded advice.
-- DO NOT generate or output links, URLs, or markdown links to laws, decrees, or lex.uz. Explain all requirements and procedures in simple, plain language without web links.
-- E-IMZO / ЭЦП is PAID (7% of BRV = ~30 800 UZS for physical persons). NEVER say it is free!
-- Clarify the difference: self-employed CAN sell on Uzum Market ONLY their own handmade goods; for resale/China goods they MUST register as YaTT.
-- Explain bank account rules accurately for both YaTT (mandatory business account) and self-employed (personal card is enough).
-- Use bullet points and emojis for readability.
-- Informational nature: Keep in mind this is an informational aid based on open official data. If a question involves complex corporate or customized taxation, advise consulting soliq.uz or a certified tax consultant.
-"""
-
-        try:
-            from google.genai import types as gtypes  # type: ignore
-            config = gtypes.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.7,
-            )
-            response = await self._generate("legal", self._legal_models(), question, config, accept=lambda r: bool(r.text))
-            return response.text, None
-        except Exception as exc:
-            logger.error("Gemini legal QA error: %s", exc)
-            return self._mock_legal_answer(question, lang, user_profile), fallback_reason(exc)
 
     # -----------------------------------------------------------------------
     # Internal: AI Studio Photoshoot Image Generation
@@ -839,52 +705,6 @@ If unsure, use general words about look and mood (colour, style, gift idea).
             else:
                 base["price_tag"] = f"💰 Цена: {desired_price:,.0f} сум"
         return base
-
-    def _mock_legal_answer(self, question: str, lang: str, user_profile: Optional[dict] = None) -> str:
-        greeting_ru = ""
-        greeting_uz = ""
-        first = (str((user_profile or {}).get("name") or "").split() or [""])[0]
-        if first:
-            name = first
-            greeting_ru = f"👤 Здравствуйте, {name}! С учётом вашего профиля:\n\n"
-            greeting_uz = f"👤 Assalomu alaykum, {name}! Sizning profilingiz bo'yicha:\n\n"
-
-        if lang == "uz":
-            return (
-                f"{greeting_uz}⚖️ **OqilaLegal — O'zbekiston qonunchiligi bo'yicha qisqa ma'lumot (2026-yil)**\n\n"
-                "📌 **1. Aylanmadan soliq (O'RQ-1108-son qonun):**\n"
-                "• YaTT va o'z-o'zini band qilganlar uchun stavka — **1%** (SK 467-modda), butun tushumdan.\n"
-                "• Har oy keyingi oyning 15-sanasigacha to'lanadi (SK 470-modda). 100 mln so'mgacha bo'lgan imtiyoz bekor qilingan.\n"
-                "• Uzum komissioner: soliqni sotuvning to'liq summasidan o'zingiz to'laysiz.\n\n"
-                "📌 **2. O'z-o'zini band qilish (PQ-4742, PF-50):**\n"
-                "• 2026-yildan ro'yxatda 72 ta faoliyat turi; oddiy chakana savdo, sartaroshlik, foto/video xizmatlari chiqarilgan.\n"
-                "• Elektron savdo maydonchalarida chakana sotish mumkin (33-band), ammo Uzum faqat o'zi ishlab chiqargan mahsulotni qabul qiladi.\n"
-                "• Ijtimoiy soliq: staj uchun ixtiyoriy, yiliga kamida 1 BHM (440 000 so'm).\n\n"
-                "📌 **3. YaTT:**\n"
-                "• Qayta sotish (Xitoy, ulgurji, bozor) uchun YaTT oching: fo.birdarcha.uz yoki my.gov.uz, davlat boji onlayn 0,9 BHM.\n"
-                "• Majburiy ijtimoiy soliq: oyiga kamida 1 BHM (440 000 so'm), 15-sanagacha.\n"
-                "• Yillik daromad 12 000 BHMdan (≈5,28 mlrd so'm) oshsa — QQS va foyda solig'iga o'tiladi (PF-100).\n\n"
-                "📌 **4. Cheklar (VMQ № 943):** onlayn-NKM, virtual kassa yoki Click/Payme elektron cheki.\n\n"
-                "📱 Rasmiy manbalar: **soliq.uz** | **my.gov.uz** | **lex.uz**"
-            )
-        return (
-            f"{greeting_ru}⚖️ **OqilaLegal — коротко о законодательстве Узбекистана (2026 г.)**\n\n"
-            "📌 **1. Налог с оборота (Закон № ЗРУ-1108):**\n"
-            "• Для ЯТТ и самозанятых ставка — **1%** (ст. 467 НК), со всей выручки.\n"
-            "• Платится ежемесячно до 15 числа следующего месяца (ст. 470 НК). Освобождение до 100 млн сум отменено.\n"
-            "• Uzum — комиссионер: налог вы платите сами со всей суммы продажи.\n\n"
-            "📌 **2. Самозанятость (ПП-4742, УП-50):**\n"
-            "• С 2026 г. в перечне 72 вида деятельности; обычная розничная торговля, парикмахерские, фото- и видеоуслуги исключены.\n"
-            "• Розничная продажа на электронных площадках разрешена (п. 33), но Uzum принимает самозанятых только с товарами своего производства.\n"
-            "• Соцналог: добровольно не менее 1 БРВ (440 000 сум) в год для стажа.\n\n"
-            "📌 **3. ЯТТ:**\n"
-            "• Для перепродажи (Китай, опт, рынок) откройте ЯТТ: fo.birdarcha.uz или my.gov.uz, госпошлина онлайн 0,9 БРВ.\n"
-            "• Обязательный соцналог: не менее 1 БРВ (440 000 сум) в месяц, до 15 числа.\n"
-            "• При доходе свыше 12 000 БРВ в год (≈5,28 млрд сум) — переход на НДС и налог на прибыль (УП-100).\n\n"
-            "📌 **4. Чеки (ПКМ № 943):** онлайн-ККМ, виртуальная касса или электронный чек Click/Payme.\n\n"
-            "📱 Официальные источники: **soliq.uz** | **my.gov.uz** | **lex.uz**"
-        )
-
 
 
 # Singleton instance

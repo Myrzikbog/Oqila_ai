@@ -49,21 +49,23 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from services.legal_kb import kb
+
 # ---------------------------------------------------------------------------
 # Constants — Uzbekistan Legal & Tax Rates (2026 г., ЗРУ-1108, УП-100)
 # ---------------------------------------------------------------------------
-BRV_UZS = 440_000                            # 1 БРВ = 440 000 сум с 01.09.2026 (УП-115 от 23.06.2026)
+BRV_UZS = int(kb.value("brv"))               # 1 БРВ с 01.09.2026 (УП-115 от 23.06.2026): значение — в services/legal_kb.json
 
 # Ставка налога с оборота для ЯТТ и самозанятых (ст. 467 НК в ред. ЗРУ-1108)
-UNIFIED_TURNOVER_TAX_RATE = 0.01             # 1% налог с оборота для ИП и самозанятых
-SELF_EMPLOYED_TAX_RATE = 0.01                # 1% налог с оборота (освобождение до 100 млн сум отменено с 01.01.2026)
-TAX_RATE_TRADE_STANDARD = 0.01               # 1% налог с оборота для ЯТТ (до 1 млрд сум)
-TAX_RATE_TRADE_ECOMMERCE = 0.01              # 1% налог с оборота для e-commerce / Uzum Market (до 1 млрд сум)
-TAX_RATE_PRODUCTION_YATT = 0.01              # 1% производство и ремесла для ЯТТ
-TAX_RATE_SERVICES_YATT = 0.01                # 1% сфера услуг для ЯТТ
+UNIFIED_TURNOVER_TAX_RATE = kb.value("turnover_rate") / 100             # 1% налог с оборота для ИП и самозанятых
+SELF_EMPLOYED_TAX_RATE = UNIFIED_TURNOVER_TAX_RATE                # 1% налог с оборота (освобождение до 100 млн сум отменено с 01.01.2026)
+TAX_RATE_TRADE_STANDARD = UNIFIED_TURNOVER_TAX_RATE               # 1% налог с оборота для ЯТТ (до 1 млрд сум)
+TAX_RATE_TRADE_ECOMMERCE = UNIFIED_TURNOVER_TAX_RATE              # 1% налог с оборота для e-commerce / Uzum Market (до 1 млрд сум)
+TAX_RATE_PRODUCTION_YATT = UNIFIED_TURNOVER_TAX_RATE              # 1% производство и ремесла для ЯТТ
+TAX_RATE_SERVICES_YATT = UNIFIED_TURNOVER_TAX_RATE                # 1% сфера услуг для ЯТТ
 
 # Порог обязательного перехода на НДС и налог на прибыль: 12 000 БРВ с 01.06.2026 (УП-100); до этого 1 млрд сум
-GENERAL_REGIME_THRESHOLD_BRV = 12_000
+GENERAL_REGIME_THRESHOLD_BRV = int(kb.value("threshold_brv"))
 ANNUAL_TURNOVER_LIMIT = GENERAL_REGIME_THRESHOLD_BRV * BRV_UZS   # ≈5,28 млрд сум
 YATT_ANNUAL_TURNOVER_LIMIT = ANNUAL_TURNOVER_LIMIT
 YATT_MANDATORY_SOCIAL_TAX = BRV_UZS          # 1 БРВ/месяц обязательно для ЯТТ (ст. 408 ч. 1)
@@ -326,7 +328,7 @@ def calculate(
         f"• <b>Налог с каждой продажи:</b> {yatt_turnover_tax:,.0f} сум (1% налог с оборота, ст. 467 НК РУз, ЗРУ-1108).\n"
         f"• <b>Соцналог ЯТТ:</b> не менее {BRV_UZS:,.0f} сум/мес (1 БРВ) независимо от объёма продаж (ст. 408 НК).\n"
         "• <b>Растаможка коммерческих партий:</b> НДС на импорт 12% + пошлина (по коду ТН ВЭД) + таможенный сбор.\n"
-        "• <b>Порог 12 000 БРВ/год (≈5,28 млрд сум, УП-100):</b> при превышении — обязательный переход на НДС и налог на прибыль."
+        f"• <b>Порог {kb.fmt('threshold_brv')} БРВ/год (≈{kb.fmt('threshold_uzs_bn')} млрд сум, УП-100):</b> при превышении — обязательный переход на НДС и налог на прибыль."
     )
     china_import_tip_uz = (
         "🇨🇳 <b>Xitoydan qayta sotish uchun tovar olib kirishdagi soliqlar va qoidalar:</b>\n"
@@ -334,7 +336,7 @@ def calculate(
         f"• <b>Har bir sotuvdan soliq:</b> {yatt_turnover_tax:,.0f} so'm (1% aylanmadan soliq, SK 467-modda, O'RQ-1108).\n"
         f"• <b>Oylik majburiy ijtimoiy soliq:</b> kamida {BRV_UZS:,.0f} so'm/oy (1 BHM, SK 408-modda).\n"
         "• <b>Tijorat partiyalarini bojxona rasmiylashtiruvi:</b> 12% import QQS + bojxona boji (TIF TN kodi bo'yicha) + bojxona yig'imi.\n"
-        "• <b>12 000 BHM chegara (≈5,28 mlrd so'm, PF-100):</b> oshib ketsa — QQS va foyda solig'iga majburiy o'tiladi."
+        f"• <b>{kb.fmt('threshold_brv')} BHM chegara (≈{kb.fmt('threshold_uzs_bn')} mlrd so'm, PF-100):</b> oshib ketsa — QQS va foyda solig'iga majburiy o'tiladi."
     )
 
     # Юридические подсказки со ссылками на законы РУз
@@ -344,7 +346,7 @@ def calculate(
         f"📦 <b>Налог со 100 продаж:</b> <b>{tax_payable_100:,.0f} сум</b>.\n"
         f"🏛️ <b>Обязательный соцналог ЯТТ:</b> не менее <b>{BRV_UZS:,.0f} сум в месяц</b> (1 БРВ, ст. 408 НК РУз).\n"
         f"📅 <b>Сроки:</b> налог с оборота — ежемесячно до 15 числа следующего месяца (ст. 470 НК); соцналог ЯТТ — до 15 числа текущего месяца.\n"
-        f"⚠️ <b>Порог 12 000 БРВ (≈5,28 млрд сум):</b> при доходе выше — переход на НДС и налог на прибыль (УП-100, с 01.06.2026).\n\n"
+        f"⚠️ <b>Порог {kb.fmt('threshold_brv')} БРВ (≈{kb.fmt('threshold_uzs_bn')} млрд сум):</b> при доходе выше — переход на НДС и налог на прибыль (УП-100, с 01.06.2026).\n\n"
         + (china_import_tip_ru if business_type == "resale" else "")
     )
     tip_uz = (
@@ -353,7 +355,7 @@ def calculate(
         f"📦 <b>100 ta sotuvdan soliq:</b> <b>{tax_payable_100:,.0f} so'm</b>.\n"
         f"🏛️ <b>YaTT majburiy ijtimoiy soliq:</b> kamida <b>{BRV_UZS:,.0f} so'm/oy</b> (1 BHM, SK 408-modda).\n"
         f"📅 <b>Muddatlar:</b> aylanmadan soliq — har oy keyingi oyning 15-sanasigacha (SK 470-modda); YaTT ijtimoiy solig'i — joriy oyning 15-sanasigacha.\n"
-        f"⚠️ <b>12 000 BHM chegarasi (≈5,28 mlrd so'm):</b> daromad oshsa — QQS va foyda solig'iga o'tiladi (PF-100, 2026-yil 1-iyundan).\n\n"
+        f"⚠️ <b>{kb.fmt('threshold_brv')} BHM chegarasi (≈{kb.fmt('threshold_uzs_bn')} mlrd so'm):</b> daromad oshsa — QQS va foyda solig'iga o'tiladi (PF-100, 2026-yil 1-iyundan).\n\n"
         + (china_import_tip_uz if business_type == "resale" else "")
     )
 
@@ -462,9 +464,9 @@ LEGAL_STEPS_RU = [
         "description": (
             "С 1 января 2026 г. ставка налога с оборота для ЯТТ и самозанятых — 1% (ст. 467 НК в ред. ЗРУ-1108). "
             "Налог считается со всей выручки, платится ежемесячно до 15 числа следующего месяца (ст. 470 НК). "
-            "Соцналог: ЯТТ — не менее 1 БРВ (440 000 сум) в месяц, до 15 числа (ст. 408 ч. 1); "
+            f"Соцналог: ЯТТ — не менее 1 БРВ ({kb.fmt('brv')} сум) в месяц, до 15 числа (ст. 408 ч. 1); "
             "самозанятые — добровольно не менее 1 БРВ в год для стажа (ст. 408 ч. 2). "
-            "При доходе свыше 12 000 БРВ в год (≈5,28 млрд сум) — переход на НДС и налог на прибыль (УП-100, с 01.06.2026)."
+            f"При доходе свыше {kb.fmt('threshold_brv')} БРВ в год (≈{kb.fmt('threshold_uzs_bn')} млрд сум) — переход на НДС и налог на прибыль (УП-100, с 01.06.2026)."
         ),
         "link": "https://my.soliq.uz",
         "badge": "📊 НК РУз ст. 467, 470 • ЗРУ-1108",
@@ -536,9 +538,9 @@ LEGAL_STEPS_UZ = [
         "description": (
             "2026-yil 1-yanvardan YaTT va o'z-o'zini band qilganlar uchun aylanmadan soliq stavkasi — 1% (SK 467-modda, O'RQ-1108). "
             "Soliq butun tushumdan hisoblanadi va har oy keyingi oyning 15-sanasigacha to'lanadi (SK 470-modda). "
-            "Ijtimoiy soliq: YaTT — oyiga kamida 1 BHM (440 000 so'm), 15-sanagacha (SK 408-modda 1-qism); "
+            f"Ijtimoiy soliq: YaTT — oyiga kamida 1 BHM ({kb.fmt('brv')} so'm), 15-sanagacha (SK 408-modda 1-qism); "
             "o'z-o'zini band qilganlar — staj uchun ixtiyoriy ravishda yiliga kamida 1 BHM (408-modda 2-qism). "
-            "Yillik daromad 12 000 BHMdan (≈5,28 mlrd so'm) oshsa — QQS va foyda solig'iga o'tiladi (PF-100, 2026-yil 1-iyundan)."
+            f"Yillik daromad {kb.fmt('threshold_brv')} BHMdan (≈{kb.fmt('threshold_uzs_bn')} mlrd so'm) oshsa — QQS va foyda solig'iga o'tiladi (PF-100, 2026-yil 1-iyundan)."
         ),
         "link": "https://my.soliq.uz",
         "badge": "📊 SK 467, 470 • O'RQ-1108",

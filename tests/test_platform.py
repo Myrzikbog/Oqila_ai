@@ -30,13 +30,7 @@ def test_generate_card_is_rate_limited_per_user(client, monkeypatch, fake_ai):
     assert client.post("/api/generate-card", data={"note": "x", "generate_photo": "false"}, headers=auth(bob)).status_code == 200
 
 
-def test_legal_qa_is_rate_limited(client, monkeypatch):
-    from services import ai_service as ai_module
-
-    async def real_answer(self, question, lang="ru", user_profile=None, force_mock=False):
-        return "ok", None
-
-    monkeypatch.setattr(ai_module.AIService, "legal_qa", real_answer)
+def test_legal_qa_is_rate_limited(client, monkeypatch, fake_legal):
     monkeypatch.setenv("AI_LEGAL_LIMIT_PER_HOUR", "1")
     user = login(client, tg_id=920003)
     assert client.post("/api/legal-qa", json={"question": "YaTT qanday ochiladi?"}, headers=auth(user)).status_code == 200

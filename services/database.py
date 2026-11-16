@@ -313,6 +313,39 @@ def init_db(force: bool = False) -> None:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_calls_created ON ai_calls(created_at)")
+            # Legal assistant: chats with their messages, and the users' ratings of answers
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS legal_chats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    title TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_chats_user ON legal_chats(user_id, id)")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS legal_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content_json TEXT NOT NULL,
+                    sources_json TEXT,
+                    is_mock INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_legal_messages_chat ON legal_messages(chat_id, id)")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS legal_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    rating INTEGER NOT NULL,
+                    comment TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (message_id, user_id)
+                )
+            """)
             # Telegram retries a webhook delivery it considers failed: remember handled update ids
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS telegram_updates (
@@ -768,6 +801,98 @@ def clear_history(user_id: int) -> bool:
     for photo in photos:  # only after the commit
         delete_photo(photo)
     return True
+
+
+# ===========================================================================
+# Legal assistant: chats, messages, ratings
+# ===========================================================================
+
+def create_legal_chat(user_id: int, title: str = "") -> int:
+    with get_db_connection() as conn:
+        cur = conn.execute("INSERT INTO legal_chats (user_id, title) VALUES (?, ?)", (user_id, title[:120]))
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def get_legal_chat(chat_id: int, user_id: int) -> Optional[Dict[str, Any]]:
+    """One chat with its messages, or None when it does not exist or belongs to someone else."""
+    with get_db_connection() as conn:
+        chat = conn.execute("SELECT id, title, created_at FROM legal_chats WHERE id = ? AND user_id = ?", (chat_id, user_id)).fetchone()
+        if not chat:
+            return None
+        rows = conn.execute(
+            "SELECT m.id, m.role, m.content_json, m.sources_json, m.is_mock, m.created_at, "
+            "(SELECT rating FROM legal_feedback f WHERE f.message_id = m.id AND f.user_id = ?) AS rating "
+            "FROM legal_messages m WHERE m.chat_id = ? ORDER BY m.id", (user_id, chat_id)).fetchall()
+    messages = [{"id": r["id"], "role": r["role"], "content": _loads(r["content_json"]) or {}, "sources": _loads_list(r["sources_json"]),
+                 "is_mock": bool(r["is_mock"]), "created_at": r["created_at"], "rating": r["rating"]} for r in rows]
+    return {"id": chat["id"], "title": chat["title"], "created_at": chat["created_at"], "messages": messages}
+
+
+def get_latest_legal_chat(user_id: int) -> Optional[Dict[str, Any]]:
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT id FROM legal_chats WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
+    return get_legal_chat(row["id"], user_id) if row else None
+
+
+def add_legal_message(chat_id: int, role: str, content: Dict[str, Any], sources: Optional[List[Dict[str, Any]]] = None, is_mock: bool = False) -> int:
+    with get_db_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO legal_messages (chat_id, role, content_json, sources_json, is_mock) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, role, json.dumps(content, ensure_ascii=False), json.dumps(sources or [], ensure_ascii=False), 1 if is_mock else 0),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def delete_legal_chat(chat_id: int, user_id: int) -> bool:
+    with get_db_connection() as conn:
+        owned = conn.execute("SELECT 1 FROM legal_chats WHERE id = ? AND user_id = ?", (chat_id, user_id)).fetchone()
+        if not owned:
+            return False
+        conn.execute("DELETE FROM legal_feedback WHERE message_id IN (SELECT id FROM legal_messages WHERE chat_id = ?)", (chat_id,))
+        conn.execute("DELETE FROM legal_messages WHERE chat_id = ?", (chat_id,))
+        conn.execute("DELETE FROM legal_chats WHERE id = ?", (chat_id,))
+        conn.commit()
+        return True
+
+
+def save_legal_feedback(message_id: int, user_id: int, rating: int, comment: str = "") -> bool:
+    """Rate an assistant message of one's own chat (1 = helpful, -1 = not). False if the message is not the user's."""
+    with get_db_connection() as conn:
+        own = conn.execute(
+            "SELECT 1 FROM legal_messages m JOIN legal_chats c ON c.id = m.chat_id WHERE m.id = ? AND c.user_id = ? AND m.role = 'assistant'",
+            (message_id, user_id)).fetchone()
+        if not own:
+            return False
+        conn.execute(
+            "INSERT INTO legal_feedback (message_id, user_id, rating, comment) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(message_id, user_id) DO UPDATE SET rating = excluded.rating, comment = excluded.comment",
+            (message_id, user_id, 1 if rating > 0 else -1, comment[:500]))
+        conn.commit()
+        return True
+
+
+def get_legal_feedback(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+    """Ratings for the admin panel, newest first, with the question and the short answer."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT f.id, f.message_id, f.user_id, f.rating, f.comment, f.created_at, m.content_json, m.is_mock, "
+            "(SELECT content_json FROM legal_messages q WHERE q.chat_id = m.chat_id AND q.role = 'user' AND q.id < m.id ORDER BY q.id DESC LIMIT 1) AS question_json "
+            "FROM legal_feedback f JOIN legal_messages m ON m.id = f.message_id ORDER BY f.id DESC LIMIT ? OFFSET ?",
+            (max(1, min(int(limit), 200)), max(0, int(offset)))).fetchall()
+    return [{"id": r["id"], "message_id": r["message_id"], "user_id": r["user_id"], "rating": r["rating"], "comment": r["comment"],
+             "created_at": r["created_at"], "is_mock": bool(r["is_mock"]),
+             "question": (_loads(r["question_json"]) or {}).get("text", ""), "short_answer": (_loads(r["content_json"]) or {}).get("short_answer", "")}
+            for r in rows]
+
+
+def _loads_list(raw: Optional[str]) -> List[Any]:
+    try:
+        value = json.loads(raw) if raw else []
+        return value if isinstance(value, list) else []
+    except Exception:
+        return []
 
 
 def remember_telegram_update(update_id: int) -> bool:

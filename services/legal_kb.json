@@ -1,0 +1,477 @@
+{
+ "version": 1,
+ "allowed_domains": [
+  "lex.uz",
+  "soliq.uz",
+  "my.soliq.uz",
+  "my.gov.uz",
+  "gov.uz",
+  "birdarcha.uz",
+  "fo.birdarcha.uz",
+  "norma.uz",
+  "buxgalter.uz",
+  "gazeta.uz",
+  "bss.uz",
+  "tbcbank.uz",
+  "kadry.uz",
+  "nchpl.uz",
+  "tax-legal.uz"
+ ],
+ "facts": [
+  {
+   "id": "brv",
+   "value": 440000,
+   "unit": "UZS",
+   "text_ru": "БРВ (базовая расчётная величина) = {brv} сум с 1 сентября 2026 г.",
+   "text_uz": "BHM (bazaviy hisoblash miqdori) = {brv} so'm, 2026-yil 1-sentabrdan.",
+   "legal_basis": "Указ № УП-115 от 23.06.2026",
+   "source_url": "https://buxgalter.uz/publish/doc/text215798_kakie_brv_i_mrot_budem_ispolzovat_s_1_sentyabrya_2026_goda",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "brv",
+    "calc",
+    "tax"
+   ]
+  },
+  {
+   "id": "turnover_rate",
+   "value": 1,
+   "unit": "%",
+   "text_ru": "Налог с оборота для ЯТТ и самозанятых — {turnover_rate}% со всей выручки; закон установил ставку для годового дохода до 1 млрд сум. Расходы и комиссия маркетплейса базу не уменьшают.",
+   "text_uz": "YaTT va o'z-o'zini band qilganlar uchun aylanmadan soliq — butun tushumdan {turnover_rate}%; qonun stavkani yillik daromadi 1 mlrd so'mgacha bo'lganlar uchun belgilagan. Xarajatlar va marketpleys komissiyasi bazani kamaytirmaydi.",
+   "legal_basis": "Закон № ЗРУ-1108 от 25.12.2025, ст. 467 НК",
+   "source_url": "https://lex.uz/ru/docs/7951016",
+   "verified_at": "2026-11-05",
+   "status": "confirmed",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "tax",
+    "turnover",
+    "yatt",
+    "self_employed",
+    "uzum"
+   ]
+  },
+  {
+   "id": "turnover_deadline_day",
+   "value": 15,
+   "unit": "day",
+   "text_ru": "Отчётный период по налогу с оборота — месяц, уплата до {turnover_deadline_day} числа следующего месяца.",
+   "text_uz": "Aylanmadan soliq bo'yicha hisobot davri — oy, to'lov keyingi oyning {turnover_deadline_day}-sanasigacha.",
+   "legal_basis": "ст. 470 НК",
+   "source_url": "https://tax-legal.uz/en/turnover-tax/",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "tax",
+    "turnover",
+    "deadline"
+   ]
+  },
+  {
+   "id": "annual_calc_deadline",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Годовой расчёт по налогу с оборота — до 15 февраля. Срок «1 апреля» не подтверждён.",
+   "text_uz": "Aylanmadan soliq bo'yicha yillik hisob-kitob — 15-fevralgacha. «1-aprel» muddati tasdiqlanmagan.",
+   "legal_basis": "НК РУз",
+   "source_url": "https://www.bss.uz/article/210-kak-rasschitat-nalog-s-oborota-v-uzbekistane",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "tax",
+    "deadline"
+   ]
+  },
+  {
+   "id": "exemption_100m_cancelled",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Освобождение самозанятых от налога при доходе до 100 млн сум отменено; налог с оборота в фиксированной сумме отменён.",
+   "text_uz": "Daromadi 100 mln so'mgacha bo'lgan o'z-o'zini band qilganlarning soliqdan ozod etilishi bekor qilingan; qat'iy summadagi aylanma solig'i bekor qilingan.",
+   "legal_basis": "Закон № ЗРУ-1108 от 25.12.2025",
+   "source_url": "https://lex.uz/ru/docs/7951016",
+   "verified_at": "2026-11-05",
+   "status": "confirmed",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "tax",
+    "self_employed"
+   ]
+  },
+  {
+   "id": "threshold_brv",
+   "value": 12000,
+   "unit": "BRV",
+   "text_ru": "Обязательный переход на НДС и налог на прибыль — при доходе свыше {threshold_brv} БРВ в год (≈{threshold_uzs_bn} млрд сум). Прежний порог 1 млрд сум не действует.",
+   "text_uz": "Yillik daromad {threshold_brv} BHMdan (≈{threshold_uzs_bn} mlrd so'm) oshsa — QQS va foyda solig'iga majburiy o'tish. Avvalgi 1 mlrd so'm chegarasi amal qilmaydi.",
+   "legal_basis": "Указ № УП-100 от 26.05.2026",
+   "source_url": "https://lex.uz/uz/docs/8237115",
+   "verified_at": "2026-11-05",
+   "status": "confirmed",
+   "valid_from": "2026-06-01",
+   "tags": [
+    "tax",
+    "threshold",
+    "vat"
+   ]
+  },
+  {
+   "id": "threshold_uzs",
+   "value": null,
+   "unit": "UZS",
+   "text_ru": "Порог общего режима в суммах: ≈{threshold_uzs_bn} млрд сум.",
+   "text_uz": "Umumiy rejim chegarasi so'mda: ≈{threshold_uzs_bn} mlrd so'm.",
+   "legal_basis": "Указ № УП-100 от 26.05.2026",
+   "source_url": "https://lex.uz/uz/docs/8237115",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "tax",
+    "threshold"
+   ],
+   "derived": {
+    "of": "threshold_brv",
+    "mul_fact": "brv"
+   }
+  },
+  {
+   "id": "social_tax_yatt",
+   "value": null,
+   "unit": "UZS",
+   "text_ru": "Социальный налог ЯТТ — не менее 1 БРВ в месяц ({social_tax_yatt} сум), до 15 числа текущего месяца.",
+   "text_uz": "YaTT ijtimoiy solig'i — oyiga kamida 1 BHM ({social_tax_yatt} so'm), joriy oyning 15-sanasigacha.",
+   "legal_basis": "ст. 408 ч. 1 НК",
+   "source_url": "https://www.gazeta.uz/ru/2026/08/03/social-tax/",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "tax",
+    "social",
+    "yatt"
+   ],
+   "derived": {
+    "of": "brv",
+    "mul": 1
+   }
+  },
+  {
+   "id": "social_tax_self_employed",
+   "value": null,
+   "unit": "UZS",
+   "text_ru": "Самозанятые платят социальный налог добровольно, не менее 1 БРВ в год ({social_tax_self_employed} сум), для трудового стажа.",
+   "text_uz": "O'z-o'zini band qilganlar ijtimoiy soliqni ixtiyoriy to'laydi, yiliga kamida 1 BHM ({social_tax_self_employed} so'm), mehnat staji uchun.",
+   "legal_basis": "ст. 408 ч. 2 НК",
+   "source_url": "https://buxgalter.uz/publish/doc/text213140_kak_uplachivayut_socialnyy_nalog_individualnye_predprinimateli",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "tax",
+    "social",
+    "self_employed"
+   ],
+   "derived": {
+    "of": "brv",
+    "mul": 1
+   }
+  },
+  {
+   "id": "fee_yatt_online",
+   "value": null,
+   "unit": "UZS",
+   "text_ru": "Госпошлина за регистрацию ЯТТ онлайн — 0,9 БРВ ({fee_yatt_online} сум).",
+   "text_uz": "YaTT ni onlayn ro'yxatdan o'tkazish davlat boji — 0,9 BHM ({fee_yatt_online} so'm).",
+   "legal_basis": "Постановление Кабмина № 66 от 09.02.2017",
+   "source_url": "https://www.bss.uz/article/1780-registratsiya-ip-podrobnyy-chek-list",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "yatt",
+    "registration",
+    "fee"
+   ],
+   "derived": {
+    "of": "brv",
+    "mul": 0.9
+   }
+  },
+  {
+   "id": "fee_yatt_cgu",
+   "value": null,
+   "unit": "UZS",
+   "text_ru": "В Центре госуслуг регистрация ЯТТ стоит 1 БРВ ({fee_yatt_cgu} сум).",
+   "text_uz": "Davlat xizmatlari markazida YaTT ro'yxatdan o'tkazish 1 BHM ({fee_yatt_cgu} so'm) turadi.",
+   "legal_basis": "Постановление Кабмина № 66 от 09.02.2017",
+   "source_url": "https://www.nchpl.uz/ru/posts/kak-otkryt-ip",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "yatt",
+    "registration",
+    "fee"
+   ],
+   "derived": {
+    "of": "brv",
+    "mul": 1
+   }
+  },
+  {
+   "id": "yatt_registration",
+   "value": null,
+   "unit": "text",
+   "text_ru": "ЯТТ регистрируют онлайн через fo.birdarcha.uz или my.gov.uz (нужна ЭЦП) либо в Центре госуслуг.",
+   "text_uz": "YaTT onlayn fo.birdarcha.uz yoki my.gov.uz orqali (ERI kerak) yoki Davlat xizmatlari markazida ro'yxatdan o'tkaziladi.",
+   "legal_basis": "Постановление Кабмина № 66 от 09.02.2017",
+   "source_url": "https://fo.birdarcha.uz",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "yatt",
+    "registration"
+   ]
+  },
+  {
+   "id": "ecp_person",
+   "value": null,
+   "unit": "UZS",
+   "text_ru": "ЭЦП (E-IMZO) платная: для физлиц около 7% БРВ (≈{ecp_person} сум); точная сумма показывается при оплате. Ключ действует 2 года.",
+   "text_uz": "ERI (E-IMZO) pullik: jismoniy shaxslar uchun taxminan BHMning 7% (≈{ecp_person} so'm); aniq summa to'lov paytida ko'rsatiladi. Kalit 2 yil amal qiladi.",
+   "legal_basis": "Закон № ЗРУ-793 от 12.10.2022",
+   "source_url": "https://tbcbank.uz/ru/blog/articles/how_to_get_ecp/",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "ecp",
+    "fee"
+   ],
+   "derived": {
+    "of": "brv",
+    "mul": 0.07
+   }
+  },
+  {
+   "id": "ecp_legal",
+   "value": null,
+   "unit": "UZS",
+   "text_ru": "Для юрлиц и ЯТТ ЭЦП стоит около 10% БРВ (≈{ecp_legal} сум).",
+   "text_uz": "Yuridik shaxslar va YaTT uchun ERI taxminan BHMning 10% (≈{ecp_legal} so'm) turadi.",
+   "legal_basis": "Закон № ЗРУ-793 от 12.10.2022",
+   "source_url": "https://my.gov.uz/ru/service/1091",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-09-01",
+   "tags": [
+    "ecp",
+    "fee"
+   ],
+   "derived": {
+    "of": "brv",
+    "mul": 0.1
+   }
+  },
+  {
+   "id": "ecp_free_id_2026",
+   "value": null,
+   "unit": "text",
+   "text_ru": "С 2026 г. при первичном получении ID-карты ЭЦП создаётся бесплатно. Бесплатность для студентов и учащихся не подтверждена.",
+   "text_uz": "2026-yildan ID-kartani birinchi marta olishda ERI bepul yaratiladi. Talabalar va o'quvchilar uchun bepulligi tasdiqlanmagan.",
+   "legal_basis": "Закон № ЗРУ-793 от 12.10.2022",
+   "source_url": "https://tbcbank.uz/ru/blog/articles/how_to_get_ecp/",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "ecp"
+   ]
+  },
+  {
+   "id": "self_employed_list",
+   "value": 72,
+   "unit": "items",
+   "text_ru": "С 1 января 2026 г. перечень видов деятельности самозанятых — {self_employed_list} пункта (раньше 104). Исключены обычная розничная торговля, парикмахерские и косметологические услуги, фото- и видеосъёмка. Номера пунктов, кроме п. 33, не называть: пусть проверят свой вид деятельности в приложении Soliq.",
+   "text_uz": "2026-yil 1-yanvardan o'z-o'zini band qilganlar faoliyat turlari ro'yxati — {self_employed_list} ta band (avval 104 ta). Oddiy chakana savdo, sartaroshlik va kosmetologiya, foto va video xizmatlari chiqarilgan. 33-bandan boshqa band raqamlarini aytmang: faoliyat turini Soliq ilovasida tekshirsin.",
+   "legal_basis": "Указ № УП-50 от 19.03.2025",
+   "source_url": "https://www.kadry.uz/article/3153-perechen-vidov-deyatelnosti-dlya-samozanyatyh-v-2026-godu-chto-izmenilos-i-chto-vajno",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "self_employed",
+    "list"
+   ]
+  },
+  {
+   "id": "self_employed_item33",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Розничная продажа на электронных торговых площадках разрешена самозанятым (п. 33 перечня), но по правилам Uzum — только свои изделия. Для перепродажи (Китай, опт, рынок) нужен ЯТТ.",
+   "text_uz": "Elektron savdo maydonchalarida chakana sotish o'z-o'zini band qilganlarga ruxsat etilgan (ro'yxatning 33-bandi), lekin Uzum qoidalariga ko'ra — faqat o'z mahsuloti. Qayta sotish (Xitoy, ulgurji, bozor) uchun YaTT kerak.",
+   "legal_basis": "Указ № УП-50 от 19.03.2025",
+   "source_url": "https://www.gazeta.uz/ru/2025/03/27/self-employed/",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "self_employed",
+    "resale",
+    "uzum",
+    "yatt"
+   ]
+  },
+  {
+   "id": "self_employed_no_staff",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Самозанятые не могут нанимать работников по трудовому договору.",
+   "text_uz": "O'z-o'zini band qilganlar mehnat shartnomasi bo'yicha xodim yollay olmaydi.",
+   "legal_basis": "ПП-4742 от 08.06.2020",
+   "source_url": "https://lex.uz/uz/docs/4849605",
+   "verified_at": "2026-11-05",
+   "status": "confirmed",
+   "valid_from": "2020-06-08",
+   "tags": [
+    "self_employed"
+   ]
+  },
+  {
+   "id": "uzum_tax_agent",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Uzum Market — комиссионер и налог за продавца НЕ удерживает: продавец сам платит налог со всей суммы продажи. Налоговым агентом по ЗРУ-1108 названы платёжные организации (цифровые платформы) для самозанятых.",
+   "text_uz": "Uzum Market — komissioner va sotuvchi uchun soliqni ushlab QOLMAYDI: sotuvchi soliqni sotuvning to'liq summasidan o'zi to'laydi. ZRU-1108 bo'yicha soliq agenti — o'z-o'zini band qilganlar uchun to'lov tashkilotlari (raqamli platformalar).",
+   "legal_basis": "Закон № ЗРУ-1108 от 25.12.2025",
+   "source_url": "https://buxgalter.uz/publish/doc/text192882_kak_vesti_uchet_i_otrajat_realizaciyu_tovarov_cherez_uzum_market",
+   "verified_at": "2026-11-05",
+   "status": "secondary",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "uzum",
+    "tax",
+    "tax_agent"
+   ]
+  },
+  {
+   "id": "kkm_rule",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Фискальный чек выдают через онлайн-ККМ, виртуальную кассу или электронный чек платёжной системы. За торговлю без ККМ предусмотрены штрафы; номер статьи и суммы не называть.",
+   "text_uz": "Fiskal chek onlayn-NKM, virtual kassa yoki to'lov tizimining elektron cheki orqali beriladi. NKMsiz savdo uchun jarimalar bor; modda raqami va summalarni aytmang.",
+   "legal_basis": "ПКМ № 943 от 23.11.2019",
+   "source_url": "https://lex.uz/docs/4603340",
+   "verified_at": "2026-11-05",
+   "status": "confirmed",
+   "valid_from": "2019-11-23",
+   "tags": [
+    "kkm",
+    "receipt"
+   ]
+  },
+  {
+   "id": "ecommerce_law",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Электронная коммерция регулируется Законом № ЗРУ-792 от 29.09.2022.",
+   "text_uz": "Elektron tijorat 2022-yil 29-sentabrdagi O'RQ-792-son Qonun bilan tartibga solinadi.",
+   "legal_basis": "Закон № ЗРУ-792 от 29.09.2022",
+   "source_url": "https://www.lex.uz/ru/docs/6213428",
+   "verified_at": "2026-11-05",
+   "status": "confirmed",
+   "valid_from": "2022-09-29",
+   "tags": [
+    "ecommerce"
+   ]
+  },
+  {
+   "id": "bank_account_instruction",
+   "value": null,
+   "unit": "text",
+   "text_ru": "Банковские счета регулирует Инструкция ЦБ (рег. МЮ № 3420 от 08.02.2023). ЯТТ нужен бизнес-счёт; самозанятому достаточно личной карты.",
+   "text_uz": "Bank hisobvaraqlarini Markaziy bank yo'riqnomasi (AV ro'yxat raqami 3420, 08.02.2023) tartibga soladi. YaTT uchun biznes-hisob kerak; o'z-o'zini band qilgan uchun shaxsiy karta yetarli.",
+   "legal_basis": "Инструкция ЦБ, рег. МЮ № 3420 от 08.02.2023",
+   "source_url": "https://lex.uz/docs/6379608",
+   "verified_at": "2026-11-05",
+   "status": "confirmed",
+   "valid_from": "2023-02-08",
+   "tags": [
+    "bank"
+   ]
+  },
+  {
+   "id": "rate_1_to_5bn",
+   "value": null,
+   "unit": "unknown",
+   "text_ru": "Ставка налога с оборота при годовом доходе от 1 млрд до порога общего режима не подтверждена. Говорить «требует уточнения на soliq.uz».",
+   "text_uz": "Yillik daromad 1 mlrd so'mdan umumiy rejim chegarasigacha bo'lganda aylanma solig'i stavkasi tasdiqlanmagan. «soliq.uz da aniqlashtirish kerak» deb ayting.",
+   "legal_basis": "ст. 467 НК (нужна ручная сверка)",
+   "source_url": "https://lex.uz",
+   "verified_at": "2026-11-05",
+   "status": "unverified",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "tax",
+    "turnover",
+    "threshold"
+   ]
+  },
+  {
+   "id": "uzum_self_employed_rule",
+   "value": null,
+   "unit": "unknown",
+   "text_ru": "Правило Uzum «самозанятые — только свои изделия» — условие площадки, а не закона; сверять с актуальной офертой seller.uzum.uz.",
+   "text_uz": "Uzumning «o'z-o'zini band qilganlar — faqat o'z mahsuloti» qoidasi — platforma sharti, qonun emas; seller.uzum.uz dagi joriy oferta bilan solishtiring.",
+   "legal_basis": "оферта Uzum (нужна ручная сверка)",
+   "source_url": "https://my.gov.uz",
+   "verified_at": "2026-11-05",
+   "status": "unverified",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "uzum",
+    "self_employed"
+   ]
+  },
+  {
+   "id": "hunarmand",
+   "value": null,
+   "unit": "unknown",
+   "text_ru": "Льготы членов ассоциации «Хунарманд» по налогу с оборота не подтверждены: не утверждать освобождение, советовать уточнить в ассоциации и на soliq.uz.",
+   "text_uz": "«Hunarmand» uyushmasi a'zolarining aylanma solig'i bo'yicha imtiyozlari tasdiqlanmagan: ozod etilgan deb aytmang, uyushmada va soliq.uz da aniqlashtirishni maslahat bering.",
+   "legal_basis": "Указ № УП-5242 от 17.11.2017 (нужна ручная сверка)",
+   "source_url": "https://gov.uz/ru/soliq/news/view/17852",
+   "verified_at": "2026-11-05",
+   "status": "unverified",
+   "valid_from": "2017-11-17",
+   "tags": [
+    "hunarmand",
+    "tax"
+   ]
+  },
+  {
+   "id": "ofd_receipts_click_payme",
+   "value": null,
+   "unit": "unknown",
+   "text_ru": "Требования к электронным чекам при оплате через Click и Payme не подтверждены; уточнять в ГНК. Тарифы Uzum, Click и Payme — коммерческие условия, а не закон.",
+   "text_uz": "Click va Payme orqali to'lovda elektron chek talablari tasdiqlanmagan; soliq xizmatida aniqlashtiring. Uzum, Click va Payme tariflari — tijoriy shartlar, qonun emas.",
+   "legal_basis": "ПКМ № 943 (нужна ручная сверка)",
+   "source_url": "https://lex.uz/docs/4603340",
+   "verified_at": "2026-11-05",
+   "status": "unverified",
+   "valid_from": "2026-01-01",
+   "tags": [
+    "kkm",
+    "payme",
+    "click"
+   ]
+  }
+ ]
+}

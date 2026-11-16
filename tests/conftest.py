@@ -118,3 +118,66 @@ def fake_ai(monkeypatch):
     monkeypatch.setattr(ai_module.ai_service, "_client", object())
     monkeypatch.setattr(ai_module.ai_service, "ai_mode", "gemini")
     return calls
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live: calls the real Gemini API; run by hand with OQILA_LIVE=1 and GEMINI_API_KEY")
+
+
+class FakeLegalModel:
+    """A scripted Gemini for the legal assistant: tells the three kinds of request apart (draft with tools,
+    search with grounding, JSON format) and records every one of them."""
+
+    def __init__(self):
+        import json as _json
+        self.json = _json
+        self.calls = []
+        self.draft = "Налог с оборота для самозанятых и ЯТТ — 1% [F:turnover_rate]. NEEDS_SEARCH: no"
+        self.search_text = "Проверено по открытым источникам: ставка 1%."
+        self.grounding = []
+        self.tool_script = None   # callable(tools_by_name) run during the draft call, like the SDK's function calling
+        self.formats = []         # answers returned by the successive format calls (the last one repeats)
+        self.raise_on = {}        # stage -> exception
+
+    def answer(self, **kw):
+        base = {"short_answer": "Ставка налога с оборота — 1%.", "steps": ["Платите до 15 числа."], "documents": [], "where_to_go": [],
+                "deadlines": [], "costs": [], "risks": [], "sources": [], "follow_up_questions": ["Когда платить?", "Нужна ли касса?", "Как открыть ЯТТ?"],
+                "confidence": "high", "escalate": False, "escalate_reason": ""}
+        base.update(kw)
+        return base
+
+    async def __call__(self, kind, models, contents, config, accept=None):
+        import types as _types
+        tools = list(config.tools or [])
+        stage = "search" if any(getattr(t, "google_search", None) for t in tools) else "format" if config.response_schema else "draft"
+        self.calls.append({"stage": stage, "kind": kind, "models": models, "contents": contents, "config": config,
+                           "system": config.system_instruction})
+        if stage in self.raise_on:
+            raise self.raise_on[stage]
+        if stage == "draft":
+            if self.tool_script:
+                self.tool_script({f.__name__: f for f in tools if callable(f)})
+            return _types.SimpleNamespace(text=self.draft)
+        if stage == "search":
+            chunks = [_types.SimpleNamespace(web=_types.SimpleNamespace(uri=u, title=t, domain=d)) for u, t, d in self.grounding]
+            meta = _types.SimpleNamespace(grounding_chunks=chunks)
+            return _types.SimpleNamespace(text=self.search_text, candidates=[_types.SimpleNamespace(grounding_metadata=meta)])
+        n = len([c for c in self.calls if c["stage"] == "format"]) - 1
+        item = self.formats[min(n, len(self.formats) - 1)] if self.formats else self.answer()
+        return _types.SimpleNamespace(text=item if isinstance(item, str) else self.json.dumps(item, ensure_ascii=False))
+
+    def stages(self):
+        return [c["stage"] for c in self.calls]
+
+
+@pytest.fixture()
+def fake_legal(monkeypatch):
+    """The legal assistant with a working (scripted) AI."""
+    from services import ai_service as ai_module
+
+    model = FakeLegalModel()
+    monkeypatch.setattr(ai_module.ai_service, "_client", object())
+    monkeypatch.setattr(ai_module.ai_service, "ai_mode", "gemini")
+    monkeypatch.setattr(ai_module.ai_service, "_generate", model)
+    monkeypatch.delenv("LEGAL_SEARCH", raising=False)
+    return model
