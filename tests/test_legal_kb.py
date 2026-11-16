@@ -122,6 +122,7 @@ def test_the_stale_script(tmp_path):
 
 def test_domain_allowlist():
     assert kb.is_allowed_domain("https://www.lex.uz/ru/docs/1") and kb.is_allowed_domain("my.soliq.uz") and kb.is_allowed_domain("fo.birdarcha.uz")
+    assert kb.is_official_domain("https://www.lex.uz/x") and kb.is_official_domain("my.soliq.uz") and not kb.is_official_domain("https://gazeta.uz/x")
     assert not kb.is_allowed_domain("https://evil-lex.uz") and not kb.is_allowed_domain("https://lex.uz.evil.com") and not kb.is_allowed_domain("")
 
 

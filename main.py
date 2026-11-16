@@ -1535,7 +1535,7 @@ def legal_faq_endpoint(lang: str = "ru"):
 @app.get("/api/legal-kb")
 def legal_kb_endpoint(lang: str = "ru"):
     """The verified legal facts with their check dates and sources."""
-    return {"facts": legal_kb.public(lang), "allowed_domains": legal_kb.allowed_domains}
+    return {"facts": legal_kb.public(lang), "allowed_domains": legal_kb.allowed_domains, "official_domains": legal_kb.official_domains}
 
 
 @app.get("/api/admin/legal-feedback")

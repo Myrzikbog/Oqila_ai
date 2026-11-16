@@ -40,7 +40,8 @@ def _fmt_number(value: float) -> str:
 class KnowledgeBase:
     def __init__(self, path: Path = KB_PATH) -> None:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        self.allowed_domains: List[str] = list(raw.get("allowed_domains", []))
+        self.allowed_domains: List[str] = list(raw.get("allowed_domains", []))  # where a fact may come from (incl. news portals)
+        self.official_domains: List[str] = list(raw.get("official_domains", []))  # state portals: only these are "official"
         self.facts: Dict[str, Dict[str, Any]] = {f["id"]: dict(f) for f in raw["facts"]}
         self._values: Dict[str, Optional[float]] = {}
         for fact_id in self.facts:
@@ -176,10 +177,20 @@ class KnowledgeBase:
             for f in self.facts.values()
         ]
 
-    def is_allowed_domain(self, url_or_domain: str) -> bool:
+    @staticmethod
+    def _host(url_or_domain: str) -> str:
         host = (urlparse(url_or_domain).hostname if "://" in url_or_domain else url_or_domain) or ""
-        host = host.lower().removeprefix("www.")
+        return host.lower().removeprefix("www.")
+
+    def is_allowed_domain(self, url_or_domain: str) -> bool:
+        """A site a knowledge-base fact may cite (state portals and the news portals that quote the texts)."""
+        host = self._host(url_or_domain)
         return any(host == d or host.endswith("." + d) for d in self.allowed_domains)
+
+    def is_official_domain(self, url_or_domain: str) -> bool:
+        """A state portal: lex.uz, soliq.uz, my.soliq.uz, my.gov.uz, gov.uz, birdarcha.uz. Only these are "official"."""
+        host = self._host(url_or_domain)
+        return any(host == d or host.endswith("." + d) for d in self.official_domains)
 
     # -- the offline answer ---------------------------------------------------------------------
     _MOCK_SECTIONS = (
@@ -208,7 +219,7 @@ class KnowledgeBase:
             "steps": steps, "documents": [],
             "where_to_go": [{"name": "soliq.uz", "url": "https://soliq.uz"}, {"name": "my.gov.uz", "url": "https://my.gov.uz"}, {"name": "lex.uz", "url": "https://lex.uz"}],
             "deadlines": [], "costs": [], "risks": [],
-            "sources": [{"title": self.facts[i]["legal_basis"], "url": self.facts[i]["source_url"], "official": self.is_allowed_domain(self.facts[i]["source_url"]) and self.facts[i]["status"] == "confirmed"} for i in ids],
+            "sources": [{"title": self.facts[i]["legal_basis"], "url": self.facts[i]["source_url"], "official": self.is_official_domain(self.facts[i]["source_url"]) and self.facts[i]["status"] == "confirmed"} for i in ids],
             "follow_up_questions": [],
             "confidence": "low", "escalate": False, "escalate_reason": "",
         }

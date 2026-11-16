@@ -473,5 +473,14 @@
     "click"
    ]
   }
+ ],
+ "official_domains": [
+  "lex.uz",
+  "soliq.uz",
+  "my.soliq.uz",
+  "my.gov.uz",
+  "gov.uz",
+  "birdarcha.uz",
+  "fo.birdarcha.uz"
  ]
 }

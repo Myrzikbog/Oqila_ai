@@ -308,7 +308,7 @@ def grounding_sources(response: Any) -> List[Dict[str, Any]]:
         if domain.endswith("vertexaisearch.cloud.google.com"):  # a redirect URL: the title carries the site name
             domain = (getattr(web, "title", "") or "").lower()
         if not any(s["url"] == web.uri for s in out):
-            out.append({"title": getattr(web, "title", None) or domain, "url": web.uri, "domain": domain, "official": kb.is_allowed_domain(domain)})
+            out.append({"title": getattr(web, "title", None) or domain, "url": web.uri, "domain": domain, "official": kb.is_official_domain(domain)})
     return out
 
 
@@ -322,7 +322,7 @@ def scrub_urls(answer: Dict[str, Any], allowed_urls: Sequence[str]) -> Dict[str,
         if url in known:
             return True
         parsed = urlparse(url)
-        return parsed.path in ("", "/") and not parsed.query and kb.is_allowed_domain(parsed.hostname or "")
+        return parsed.path in ("", "/") and not parsed.query and kb.is_official_domain(parsed.hostname or "")
 
     def clean(text: str) -> str:
         return " ".join(_URL.sub(lambda m: m.group(0) if ok(m.group(0)) else "", text).split())
@@ -342,7 +342,7 @@ def fact_sources(fact_ids: Sequence[str]) -> List[Dict[str, Any]]:
     for fact_id in dict.fromkeys(fact_ids):
         fact = kb.facts.get(fact_id)
         if fact:
-            out.append({"title": fact["legal_basis"], "url": fact["source_url"], "official": fact["status"] == "confirmed" and kb.is_allowed_domain(fact["source_url"]),
+            out.append({"title": fact["legal_basis"], "url": fact["source_url"], "official": fact["status"] == "confirmed" and kb.is_official_domain(fact["source_url"]),
                         "verified_at": fact["verified_at"], "fact_id": fact_id})
     return out
 

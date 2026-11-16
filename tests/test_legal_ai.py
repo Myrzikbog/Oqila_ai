@@ -160,6 +160,7 @@ def test_search_runs_only_when_asked_and_sources_are_filtered(client, fake_legal
         ("https://lex.uz/docs/1", "Закон", "lex.uz"),
         ("https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc", "soliq.uz", ""),
         ("https://some-blog.example/post", "Блог", "some-blog.example"),
+        ("https://www.gazeta.uz/ru/2026/x", "gazeta.uz", "gazeta.uz"),
     ]
     fake_legal.formats = [fake_legal.answer(
         short_answer="Смотрите https://lex.uz/docs/1 и https://invented.example/law.",
@@ -175,6 +176,7 @@ def test_search_runs_only_when_asked_and_sources_are_filtered(client, fake_legal
     assert by_url["https://lex.uz/docs/1"]["official"] is True
     assert by_url["https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"]["official"] is True, "a redirect link is judged by the site name"
     assert by_url["https://some-blog.example/post"]["official"] is False, "other domains are kept but not official"
+    assert by_url["https://www.gazeta.uz/ru/2026/x"]["official"] is False, "a news portal is a source, not a state portal"
     answer = data["answer"]
     assert "invented.example" not in json.dumps(answer) and "999-invented" not in json.dumps(answer) and "phishing" not in json.dumps(answer)
     assert "https://lex.uz/docs/1" in answer["short_answer"] and "https://soliq.uz" in answer["steps"][0], "known sources and bare portals stay"
