@@ -18,25 +18,21 @@ import {
   Info, 
   Sparkles, 
   Check, 
-  ChevronRight, 
   Search, 
   Eye, 
   EyeOff,
   BellRing,
   Download,
-  ShieldAlert,
   Layers,
   ChevronDown,
   ChevronUp,
   Calculator,
-  Zap,
-  BarChart2,
   ExternalLink
 } from 'lucide-react';
 import { hapticImpact, hapticNotify, showAlert, showConfirm } from '../utils/telegram';
 import { fireConfetti } from '../utils/confetti';
 
-export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
+export default function TabUzum({ lang, t, profile }) {
   useMediaToken();
   // Main state
   const [subTab, setSubTab] = useState('orders'); // 'orders' | 'stocks' | 'finance' | 'settings'
@@ -328,7 +324,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         if (mgRes.ok) setMarginData(await mgRes.json());
         setTimeout(() => setFeedbackMsg(''), 3000);
       }
-    } catch (err) {
+    } catch {
       setErrorMsg(t.ui_tabuzum_11);
     }
   };
@@ -372,7 +368,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
       } else {
         setErrorMsg(data.detail || (t.ui_tabuzum_13));
       }
-    } catch (err) {
+    } catch {
       setErrorMsg(t.ui_tabuzum_14);
     } finally {
       setTestingAlertSku(null);
@@ -403,7 +399,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         const err = await res.json();
         showAlert(err.detail || (t.ui_tabuzum_15));
       }
-    } catch (err) {
+    } catch {
       showAlert(t.ui_tabuzum_16);
     }
   };

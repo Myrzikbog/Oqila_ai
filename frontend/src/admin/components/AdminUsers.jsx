@@ -2,16 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Search, 
-  Filter, 
   Download, 
   Eye, 
   CheckCircle, 
-  XCircle, 
-  Building2, 
-  UserCheck, 
-  HelpCircle,
-  Sparkles,
-  Send,
   RefreshCw,
   ChevronLeft,
   ChevronRight
@@ -56,6 +49,7 @@ export default function AdminUsers({ onSelectUser }) {
   // One effect loads the list for the page, the filters and the applied search: the offset is never stale
   useEffect(() => {
     let alive = true;
+    // eslint-disable-next-line react/set-state-in-effect -- the loading state belongs to the request this effect starts
     setIsLoading(true);
     setError('');
     fetchAdminUsers({ limit, offset: page * limit, search: query, status: statusFilter, category: categoryFilter })

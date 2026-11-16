@@ -158,7 +158,6 @@ export default function App() {
                 lang={lang}
                 t={t}
                 profile={profile}
-                userId={userId}
                 onOpenHistory={() => setIsHistoryOpen(true)}
                 externalCardToLoad={selectedHistoryCard}
               />
@@ -194,7 +193,6 @@ export default function App() {
           <HistoryModal
             isOpen={isHistoryOpen}
             onClose={() => setIsHistoryOpen(false)}
-            userId={userId}
             onSelectCard={(card) => {
               setSelectedHistoryCard(card);
               handleSetTab('studio');

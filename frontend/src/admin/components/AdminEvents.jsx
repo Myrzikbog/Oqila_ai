@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Activity, 
-  Filter, 
-  Search, 
   RefreshCw, 
   User, 
-  Clock, 
   Code,
   X
 } from 'lucide-react';
@@ -38,7 +35,9 @@ export default function AdminEvents({ onSelectUser }) {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- loads the list when the filter changes
     loadEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads only when the filter changes
   }, [eventTypeFilter]);
 
   return (

@@ -35,6 +35,7 @@ import { useMediaToken } from '../utils/useMediaToken';
 import { OutputTypePicker, StylePicker } from './studio/StylePicker';
 import CardView from './studio/CardView';
 import Collapsible from './Collapsible';
+import { copyText } from '../utils/clipboard';
 import { apiFetch } from '../utils/api';
 import { prepareImage } from '../utils/imageFile';
 import { useClosingConfirmation } from '../utils/useTelegram';
@@ -60,7 +61,7 @@ const FALLBACK_REGISTRY = {
 let registryCache = null;
 const ASPECT_CLASS = { '1:1': 'aspect-square', '3:4': 'aspect-[3/4]', '4:5': 'aspect-[4/5]', '9:16': 'aspect-[9/16]' };
 
-export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, userId }) {
+export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad }) {
   useMediaToken();
   // Form State
   const [imageFile, setImageFile] = useState(null);
@@ -130,6 +131,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   useEffect(() => {
     let interval;
     if (isLoading) {
+      // eslint-disable-next-line react/set-state-in-effect -- the progress bar restarts when a generation starts
       setLoadingProgress(15);
       interval = setInterval(() => {
         setLoadingProgress((prev) => {
@@ -148,6 +150,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   useEffect(() => {
     if (externalCardToLoad) {
       const card = externalCardToLoad; // a card from the history already carries copy / verification / aspect
+      // eslint-disable-next-line react/set-state-in-effect -- a card chosen in the history is loaded into the studio
       setResult(card);
       setResultOriginal(card.source_photo_url || null);
       setIsFormCollapsed(true);
@@ -304,7 +307,6 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
       if (oldPrice) formData.append('old_price', oldPrice.replace(/\D/g, ''));
       if (infoText.trim()) formData.append('info_text', infoText.trim());
     }
-    if (userId) formData.append('user_id', userId);
 
     try {
       setErrorMessage('');
@@ -340,19 +342,18 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     hapticImpact('medium');
     const tags = (result.hashtags || []).join(' ');
     const text = `${result.title}\n\n${result.description}\n\n${result.price_tag}\n\n${tags}`;
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyText(text)) {
       setCopied(true);
       hapticNotify('success');
       setTimeout(() => setCopied(false), 2500);
-    } catch (err) {
-      console.error(err);
+    } else {
+      hapticNotify('error');
     }
   };
 
-  const copySingleTag = (tag) => {
-    navigator.clipboard.writeText(tag);
+  const copySingleTag = async (tag) => {
     hapticImpact('light');
+    if (!(await copyText(tag))) return;
     setCopiedTag(tag);
     setTimeout(() => setCopiedTag(null), 1500);
   };
@@ -996,6 +997,12 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                 )}
               </div>
             </div>
+          )}
+
+          {result.uzum_ready && (
+            <p role="status" className={`text-xs font-semibold ${result.uzum_ready.white_background ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}`}>
+              {result.uzum_ready.white_background ? t.uzum_ready_ok : t.uzum_ready_check}
+            </p>
           )}
 
           {/* Title & Description */}

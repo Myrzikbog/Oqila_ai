@@ -12,8 +12,6 @@ import {
   ShoppingBag,
   RefreshCw,
   Calendar,
-  Layers,
-  CheckCircle2,
   Download
 } from 'lucide-react';
 import { fetchAdminDashboard, downloadUsersCsv, downloadCardsCsv } from '../utils/adminApi';
@@ -58,6 +56,7 @@ export default function AdminDashboard({ onSelectTab }) {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- loads the numbers once on mount
     loadMetrics();
   }, []);
 

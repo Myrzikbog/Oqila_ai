@@ -1,14 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { 
-  Sparkles, 
   Camera, 
   Calculator, 
   Scale, 
   ArrowRight, 
-  Check, 
-  X,
-  ShoppingBag,
-  Percent,
   FileCheck2
 } from 'lucide-react';
 import { useTelegramBackButton } from '../utils/useTelegram';
@@ -16,7 +11,7 @@ import { useDialog } from '../utils/useDialog';
 import { writeStorage } from '../utils/storage';
 import { hapticImpact, hapticNotify } from '../utils/telegram';
 
-export default function OnboardingModal({ isOpen, onClose, t, lang }) {
+export default function OnboardingModal({ isOpen, onClose, t }) {
   const [currentStep, setCurrentStep] = useState(0);
 
   useTelegramBackButton(isOpen, onClose);

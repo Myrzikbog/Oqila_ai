@@ -2,18 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { showAlert } from '../../utils/telegram';
 import { 
   X, 
-  User, 
   Sparkles, 
-  Activity, 
-  Calendar, 
-  Clock, 
-  ShoppingBag, 
-  Building2, 
-  Tag, 
-  ShieldCheck,
-  CheckCircle,
-  ExternalLink
-} from 'lucide-react';
+  Activity} from 'lucide-react';
 import { fetchAdminUserDetails, toggleAdminUserActive } from '../utils/adminApi';
 
 export default function AdminUserDetailModal({ userId, onClose }) {
@@ -35,7 +25,9 @@ export default function AdminUserDetailModal({ userId, onClose }) {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- loads the user's details when the modal opens
     loadDetails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads only when the user changes
   }, [userId]);
 
   if (!userId) return null;

@@ -1,15 +1,12 @@
-import { StrictMode, Suspense, lazy } from 'react'
+import { StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import { installAuthFetch, setReloginHandler } from './utils/session'
 import { readJson } from './utils/storage';
+import { AdminApp, StageApp } from './routes';
 import { loginWithBackend } from './utils/auth'
 
-// The admin panel is loaded only on the admin route, keeping it out of the main bundle
-const AdminApp = lazy(() => import('./admin/AdminApp.jsx'));
-// The /stage presentation screen is public and loaded only on that route
-const StageApp = lazy(() => import('./stage/StageApp.jsx'));
 
 installAuthFetch();
 setReloginHandler(async () => Boolean(await loginWithBackend()));

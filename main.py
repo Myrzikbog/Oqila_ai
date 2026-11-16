@@ -81,7 +81,8 @@ from services.legal_calc import (
 from services.media_storage import delete_photo, resolve_photo, store_bytes
 from services.info_photo import CopySpec, apply_slots, too_long_fields
 from services.presets import STYLES_BY_ID, pick_aspect, public_registry, style_kind
-from services.imaging import ImageRejected, normalize_logo, normalize_source
+from services.bot_link import bot_username
+from services.imaging import ImageRejected, corner_whiteness, normalize_logo, normalize_source
 from services.legal_ai import refusal as legal_refusal, run_legal
 from services.legal_faq import get_faq
 from services.legal_kb import kb as legal_kb
@@ -549,6 +550,17 @@ def _msg(texts: dict, lang: Optional[str]) -> str:
     return texts["uz" if lang == "uz" else "ru"]
 
 
+def _has_white_background(data_url: str) -> bool:
+    """True when the four corners of a finished picture (a data: URL) are pure white."""
+    import base64
+
+    try:
+        raw = base64.b64decode(data_url.split(",", 1)[1])
+        return corner_whiteness(raw) >= 250
+    except Exception:
+        return False
+
+
 def _brand_for_ai(user_id: int) -> tuple:
     """(brand settings, logo PNG bytes or None): the brand goes into the prompt, the logo is a reference image."""
     brand = get_brand(user_id)
@@ -645,6 +657,10 @@ async def generate_card(
                 user_id=user_id,
             )
             return JSONResponse(content=result)
+
+        if photoshoot_style == "uzum_clean" and result.get("studio_photo_url"):
+            # The marketplace checklist: is the background really white (the four corners of the finished picture)?
+            result["uzum_ready"] = {"white_background": await run_blocking(_has_white_background, result["studio_photo_url"])}
 
         # Pictures with text and clean photos keep the seller's own photo: it is the reference for every re-render
         source_ref: Optional[str] = None
@@ -1279,8 +1295,24 @@ def get_finance_meta():
     }
 
 
+_calc_logged: dict = {}  # address -> time of its last logged calculation
+
+
+def _should_log_calculation(ip: str, now: Optional[float] = None) -> bool:
+    """/api/calculate needs no sign-in, so it must not write a database row per request: one row per address and 10 s."""
+    import time
+
+    now = time.monotonic() if now is None else now
+    if len(_calc_logged) > 5000:
+        _calc_logged.clear()
+    if now - _calc_logged.get(ip, -1e9) < 10:
+        return False
+    _calc_logged[ip] = now
+    return True
+
+
 @app.post("/api/calculate")
-def calculate_profit(req: CalcRequest):
+def calculate_profit(req: CalcRequest, request: Request):
     """
     Calculate profit, margin, taxes and pricing recommendations across sales channels.
     """
@@ -1302,20 +1334,21 @@ def calculate_profit(req: CalcRequest):
         fixed_costs=req.fixed_costs,
     )
 
-    log_event(
-        event_type="calculate",
-        lang=req.lang,
-        is_mock=False,
-        details={
-            "sale_price": req.sale_price,
-            "cost_price": req.cost_price,
-            "net_profit": result.net_profit,
-            "margin_pct": result.margin_pct,
-            "business_type": req.business_type,
-            "trade_regime": req.trade_regime,
-            "category": req.category,
-        },
-    )
+    if _should_log_calculation(client_ip(request)):
+        log_event(
+            event_type="calculate",
+            lang=req.lang,
+            is_mock=False,
+            details={
+                "sale_price": req.sale_price,
+                "cost_price": req.cost_price,
+                "net_profit": result.net_profit,
+                "margin_pct": result.margin_pct,
+                "business_type": req.business_type,
+                "trade_regime": req.trade_regime,
+                "category": req.category,
+            },
+        )
 
     return JSONResponse(
         content={
@@ -1520,7 +1553,7 @@ def _own_telegram_chat_id(user: dict) -> int:
     if tg_id <= 0:
         raise HTTPException(
             status_code=400,
-            detail="Telegram chat topilmadi. Ilovani @oqila_ai_bot orqali oching va /start bosing.",
+            detail=f"Telegram chat topilmadi. Ilovani @{bot_username()} orqali oching va /start bosing.",
         )
     return tg_id
 
@@ -1738,7 +1771,7 @@ async def test_uzum_fbo_alert_endpoint(req: UzumFboAlertRequest, user: dict = De
 def get_analytics():
     """Public aggregate statistics (counts only) for the /stage presentation page."""
     stats = get_stats()
-    stats["bot_username"] = os.getenv("TELEGRAM_BOT_USERNAME", "oqila_ai_bot").strip().lstrip("@") or "oqila_ai_bot"
+    stats["bot_username"] = bot_username()
     stats["generated_at"] = datetime.now().isoformat(timespec="seconds")
     return JSONResponse(content=stats, headers={"Cache-Control": "no-store"})
 

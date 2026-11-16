@@ -36,6 +36,7 @@ from services.database import (
     update_uzum_order_status,
 )
 from services.barcode import barcode_bars, sanitize_barcode_text
+from services.bot_link import bot_url
 from services.telegram_service import telegram_service
 
 logger = logging.getLogger("oqila_uzum")
@@ -994,7 +995,7 @@ class UzumService:
                 [
                     {
                         "text": "📱 Oqila ilovasida ko'rish",
-                        "url": "https://t.me/oqila_ai_bot",
+                        "url": bot_url(),
                     }
                 ]
             ]
@@ -1073,7 +1074,7 @@ class UzumService:
                         },
                         {
                             "text": "📱 Oqila ilovasini ochish",
-                            "url": "https://t.me/oqila_ai_bot",
+                            "url": bot_url(),
                         },
                     ],
                 ]

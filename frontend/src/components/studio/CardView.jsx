@@ -74,7 +74,7 @@ export default function CardView({ card, registry, lang, onUpdate }) {
   const [notice, setNotice] = useState('');
 
   const fields = style?.fields || {};
-  const limits = style?.limits || {};
+  const limits = useMemo(() => style?.limits || {}, [style]);
   const verification = card.verification;
   const blocks = countBlocks(form);
   const maxBlocks = style?.max_blocks || 6;

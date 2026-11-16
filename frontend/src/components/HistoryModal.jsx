@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { withToken } from '../utils/session';
+import { copyText } from '../utils/clipboard';
 import { apiFetch } from '../utils/api';
 import { downloadServerFile } from '../utils/download';
 import { useTelegramBackButton } from '../utils/useTelegram';
@@ -9,7 +10,6 @@ import { useMediaToken } from '../utils/useMediaToken';
 const escapeHtml = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 import { 
-  History, 
   X, 
   Trash2, 
   Sparkles, 
@@ -22,12 +22,10 @@ import {
   PackageOpen,
   Search,
   Star,
-  Printer,
-  Filter
-} from 'lucide-react';
+  Printer} from 'lucide-react';
 import { hapticImpact, hapticNotify, showConfirm } from '../utils/telegram';
 
-export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, userId }) {
+export default function HistoryModal({ isOpen, onClose, onSelectCard, t }) {
   useMediaToken(); // pictures are loaded with a short-lived media token: render again when it is renewed
   const [historyItems, setHistoryItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -112,10 +110,12 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
     hapticImpact('light');
     const tags = (item.hashtags || []).join(' ');
     const text = `${item.title}\n\n${item.description}\n\n${item.price_tag}\n\n${tags}`;
-    navigator.clipboard.writeText(text);
-    setCopiedId(item.id);
-    hapticNotify('success');
-    setTimeout(() => setCopiedId(null), 2000);
+    copyText(text).then((ok) => {
+      if (!ok) return;
+      setCopiedId(item.id);
+      hapticNotify('success');
+      setTimeout(() => setCopiedId(null), 2000);
+    });
   };
 
   const handleDownloadPhoto = async (e, item) => {
@@ -181,7 +181,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
         hour: '2-digit',
         minute: '2-digit',
       });
-    } catch (e) {
+    } catch {
       return isoString;
     }
   };

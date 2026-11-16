@@ -1,11 +1,17 @@
 """
-ai_service.py — AI pipeline for Oqila AI (Gemini Multimodal Vision + Studio Photoshoot + Mock fallback)
+ai_service.py — the AI pipeline of Oqila AI (Google Gemini).
 
-Supports:
-  - Real Gemini API (google-genai SDK >= 2.3.0) with multimodal image understanding
-  - AI Studio Photoshoot generation (gemini-2.5-flash-image) with configurable presets
-  - Content tone and format customization (Instagram, Telegram, Uzum)
-  - Mock mode: rich hardcoded Uzbek/Russian demo data for offline/hackathon stage use
+What it does (every request goes through `_generate`: own thread pool, timeout, models from the environment,
+each attempt counted in ai_calls):
+  - the selling text of a product card (text model, from the photo and the seller's notes)
+  - studio photos without text (image model, with a fallback model) and clean marketplace photos
+  - pictures WITH text (information cards, posters, promos, stories): `render_card` draws, reads the text back,
+    corrects only the wrong strings and never uses the fallback model; the server draws no text itself
+  - the legal assistant (services/legal_ai.py) uses `_generate` from here too
+
+Models: GEMINI_TEXT_MODEL / GEMINI_TEXT_FALLBACK_MODEL, GEMINI_IMAGE_MODEL / GEMINI_IMAGE_FALLBACK_MODEL,
+GEMINI_VERIFY_MODEL (reads text from pictures), GEMINI_LEGAL_MODEL. Without a key, with AI_MODE=mock, over the daily
+budget or on an error the answer is the built-in sample text flagged with `ai_fallback`; it is never saved as a card.
 """
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ from services.info_photo import (
     shorten_copy,
     verify_text,
 )
-from services.presets import ASPECTS, DEFAULT_ASPECT, STYLES_BY_ID, STYLES, build_scene_prompt, model_aspect, style_kind
+from services.presets import ASPECTS, DEFAULT_ASPECT, STYLES_BY_ID, build_scene_prompt, model_aspect, style_kind
 
 from services.rate_limit import record_ai_call
 
@@ -56,13 +62,6 @@ def fallback_reason(exc: BaseException) -> str:
     """"quota" when Gemini refused because of limits or billing, otherwise "error"."""
     text = str(exc)
     return "quota" if any(k in text for k in ("RESOURCE_EXHAUSTED", "402", "429", "quota")) else "error"
-
-# ---------------------------------------------------------------------------
-# Photoshoot Style Presets
-# ---------------------------------------------------------------------------
-# Photo styles live in services/presets.py (one registry for backend, frontend and poster layouts).
-# This id -> prompt mapping is kept for backward compatibility.
-PHOTOSHOOT_PRESETS = {style["id"]: style["prompt"] for style in STYLES if style["prompt"]}
 
 TONE_PRESETS = {
     "luxury": "Tone: exclusive, high-end, premium luxury. Emphasize top-notch materials, prestige and bespoke elegance.",
@@ -137,13 +136,8 @@ MOCK_RESPONSE_RU = {
 # AI Service class
 # ---------------------------------------------------------------------------
 class AIService:
-    """
-    Wraps Google Gemini API for:
-      1. Multimodal product visual analysis & copywriting (gemini-2.5-flash)
-      2. AI Studio Photoshoot generation (gemini-2.5-flash-image)
-      3. Nothing about law: the legal assistant lives in services/legal_ai.py and only uses `_generate` from here
-    Falls back to mock data if GEMINI_API_KEY is absent, AI_MODE=mock, or any error occurs.
-    """
+    """Wraps the Google Gemini API; see the module docstring. Falls back to flagged sample data when the AI is
+    unavailable (no key, AI_MODE=mock, budget spent, error)."""
 
     def __init__(self) -> None:
         self.api_key: Optional[str] = os.getenv("GEMINI_API_KEY")

@@ -7,10 +7,7 @@ import {
   X, 
   Check, 
   HelpCircle,
-  ShoppingBag,
   Store,
-  Send,
-  Camera,
   Scissors,
   Palette,
   Cake,
@@ -44,6 +41,7 @@ export default function ProfileModal({
 
   useEffect(() => {
     if (profile) {
+      // eslint-disable-next-line react/set-state-in-effect -- the form is filled from the profile when the modal opens
       setName(profile.name || tgUser?.first_name || '');
       setStatus(profile.status || 'self_employed');
       setCategory(profile.category || 'sewing');
@@ -51,7 +49,7 @@ export default function ProfileModal({
     } else if (tgUser?.first_name) {
       setName(tgUser.first_name);
     }
-  }, [profile, isOpen]);
+  }, [profile, isOpen, tgUser?.first_name]);
 
   useTelegramBackButton(isOpen, onClose);
   const dialogRef = useRef(null);

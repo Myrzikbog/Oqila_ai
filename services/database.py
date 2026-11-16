@@ -748,18 +748,6 @@ def unsubscribe_subscriber(chat_id: int) -> bool:
         return False
 
 
-def get_subscribers() -> List[Dict[str, Any]]:
-    """Return all active bot subscribers."""
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT chat_id, username, lang FROM bot_subscribers WHERE is_active = 1")
-            return [dict(r) for r in cursor.fetchall()]
-    except Exception as exc:
-        logger.error("Failed to fetch subscribers: %s", exc)
-        return []
-
-
 def delete_history_item(card_id: int, user_id: int) -> bool:
     """Delete one of the user's generated cards from history. Files are removed only after the commit:
     a failed transaction must not leave a card pointing at deleted pictures."""

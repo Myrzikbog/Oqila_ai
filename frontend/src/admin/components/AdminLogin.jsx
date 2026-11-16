@@ -25,7 +25,7 @@ export default function AdminLogin({ onLoginSuccess }) {
       } else {
         setErrorMessage('Неверный ключ администратора. Проверьте правильность ввода.');
       }
-    } catch (err) {
+    } catch {
       setErrorMessage('Ошибка подключения к серверу. Попробуйте снова.');
     } finally {
       setIsLoading(false);

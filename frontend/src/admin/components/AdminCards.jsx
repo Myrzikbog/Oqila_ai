@@ -3,11 +3,8 @@ import { showAlert } from '../../utils/telegram';
 import { 
   Sparkles, 
   Search, 
-  Tag, 
-  ExternalLink, 
   User, 
   RefreshCw,
-  Heart,
   Lightbulb,
   Download
 } from 'lucide-react';
@@ -32,6 +29,7 @@ export default function AdminCards({ onSelectUser }) {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- loads the cards once on mount
     loadCards();
   }, []);
 

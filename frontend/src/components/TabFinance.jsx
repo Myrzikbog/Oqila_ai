@@ -19,12 +19,10 @@ import {
   Coins,
   PackageCheck,
   Globe2,
-  DollarSign,
   SlidersHorizontal,
   BarChart3,
-  ArrowRightLeft,
-  Star
-} from 'lucide-react';
+  ArrowRightLeft} from 'lucide-react';
+import { copyText } from '../utils/clipboard';
 import { apiFetch } from '../utils/api';
 import { hapticImpact } from '../utils/telegram';
 import Collapsible, { Disclosure } from './Collapsible';
@@ -61,6 +59,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
   useEffect(() => {
     if (profile) {
       if (profile.status === 'self_employed') {
+        // eslint-disable-next-line react/set-state-in-effect -- the calculator defaults follow the profile
         setBusinessType('production');
       } else if (profile.status === 'yatt' && profile.category === 'resale') {
         setBusinessType('resale');
@@ -107,7 +106,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
       }
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [salePrice, costPrice, businessType, tradeRegime, category, fixedCosts, lang]);
+  }, [salePrice, costPrice, businessType, tradeRegime, category, fixedCosts, lang, t.ui_tabfinance_1]);
 
   const formatMoney = (val) => {
     if (val === undefined || val === null) return '0';
@@ -149,11 +148,11 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
         `💬 Telegram (Click/Payme): Чистая прибыль ${formatMoney(calcData.telegram_net)} сум\n` +
         `${!calcData.self_employed_allowed ? '⚠️ ВНИМАНИЕ: Для перепродажи откройте ЯТТ — обычная розничная торговля исключена из перечня самозанятых (УП-50), а Uzum принимает только товары своего производства.' : ''}`;
 
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
+    copyText(text).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
-    }
+    });
   };
 
   const compareSummary = (() => {

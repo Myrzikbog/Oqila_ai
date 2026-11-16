@@ -7,16 +7,13 @@ import {
   Scale, 
   Users, 
   Heart, 
-  ShieldCheck, 
   ShieldAlert,
   CheckCircle2, 
   Layers, 
-  Laptop, 
-  Globe2,
   GraduationCap
 } from 'lucide-react';
 
-export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
+export default function TabAbout({ t, onOpenOnboardingTour }) {
   const audienceList = [
     t.aud_1,
     t.aud_2,
