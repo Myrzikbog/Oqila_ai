@@ -4,7 +4,7 @@ import Collapsible from '../Collapsible';
 import RichText from '../RichText';
 import { hapticImpact } from '../../utils/telegram';
 
-const money = (amount, lang) => `${new Intl.NumberFormat('ru-RU').format(Math.round(amount)).replace(/ /g, ' ')} ${lang === 'uz' ? "so'm" : 'сум'}`;
+const money = (amount, currency) => `${new Intl.NumberFormat('ru-RU').format(Math.round(amount)).replace(/ /g, ' ')} ${currency}`;
 
 function Notice({ tone, icon: Icon, children }) {
   const tones = {
@@ -25,7 +25,7 @@ function Notice({ tone, icon: Icon, children }) {
  * check date, honest notices (template answer, lawyer needed, check the calculation) and follow-up questions.
  * No raw HTML anywhere: text goes through RichText, links are built from server-checked URLs.
  */
-export default function LegalAnswerCard({ message, lang, t, isLast, onFollowUp, onRate }) {
+export default function LegalAnswerCard({ message, t, isLast, onFollowUp, onRate }) {
   const a = message.answer;
   const isLow = a.confidence === 'low' && !message.fallback;
   const rate = (rating) => { hapticImpact('light'); onRate(message, rating); };
@@ -74,7 +74,7 @@ export default function LegalAnswerCard({ message, lang, t, isLast, onFollowUp, 
       {a.costs.length > 0 && (
         <Collapsible icon={Banknote} title={t.legal_costs}>
           <ul className="px-4 pb-3 space-y-1 text-xs text-slate-700 dark:text-slate-300">
-            {a.costs.map((c, i) => <li key={i} className="flex justify-between gap-3"><span>{c.item}</span><b className="tabular-nums whitespace-nowrap">{money(c.amount_uzs, lang)}</b></li>)}
+            {a.costs.map((c, i) => <li key={i} className="flex justify-between gap-3"><span>{c.item}</span><b className="tabular-nums whitespace-nowrap">{money(c.amount_uzs, t.ui_legalanswercard_1)}</b></li>)}
           </ul>
         </Collapsible>
       )}
@@ -89,7 +89,7 @@ export default function LegalAnswerCard({ message, lang, t, isLast, onFollowUp, 
             {message.sources.map((s, i) => (
               <li key={i} className="space-y-0.5">
                 <a href={s.url} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-700 dark:text-teal-300 underline break-words">{s.title || s.url}</a>
-                <div className="flex flex-wrap gap-1.5 text-[10px] font-bold">
+                <div className="flex flex-wrap gap-1.5 text-xs font-bold">
                   <span className={`px-1.5 py-0.5 rounded ${s.official ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'}`}>
                     {s.official ? t.legal_official : t.legal_unofficial}
                   </span>
@@ -113,7 +113,7 @@ export default function LegalAnswerCard({ message, lang, t, isLast, onFollowUp, 
       )}
 
       <div className="flex items-center justify-between gap-2 pt-1">
-        <p className="text-[10px] leading-snug text-slate-500 dark:text-slate-400 flex gap-1"><Scale className="w-3 h-3 flex-shrink-0 mt-0.5" aria-hidden="true" />{t.legal_disclaimer_short}</p>
+        <p className="text-xs leading-snug text-slate-500 dark:text-slate-400 flex gap-1"><Scale className="w-3 h-3 flex-shrink-0 mt-0.5" aria-hidden="true" />{t.legal_disclaimer_short}</p>
         {message.id && !message.fallback && (
           <div className="flex gap-1 flex-shrink-0">
             <button type="button" aria-pressed={message.rating === 1} aria-label={t.legal_helpful} onClick={() => rate(1)}

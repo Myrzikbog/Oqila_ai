@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { showAlert } from '../../utils/telegram';
 import { 
   Sparkles, 
   Search, 
@@ -46,7 +47,7 @@ export default function AdminCards({ onSelectUser }) {
   });
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-300">
+    <div className="space-y-4 animate-in  duration-300">
       {/* Header */}
       <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -84,7 +85,7 @@ export default function AdminCards({ onSelectUser }) {
               try {
                 await downloadCardsCsv();
               } catch (e) {
-                alert('Ошибка при скачивании CSV: ' + e.message);
+                showAlert('Ошибка при скачивании CSV: ' + e.message);
               }
             }}
             className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-medium flex items-center space-x-1.5 transition-colors"
@@ -117,7 +118,7 @@ export default function AdminCards({ onSelectUser }) {
               {card.studio_photo_url && (
                 <div className="relative h-44 w-full bg-slate-950 overflow-hidden border-b border-slate-800">
                   <AdminPhoto card={card} alt={card.title} className="w-full h-full object-cover" />
-                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[10px] text-white font-mono">
+                  <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-sm text-[10px] text-white font-mono">
                     {card.photoshoot_style || 'studio'}
                   </div>
                 </div>

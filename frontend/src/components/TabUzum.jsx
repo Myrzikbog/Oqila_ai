@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { mediaUrl, withToken } from '../utils/session';
+import { withToken, mediaUrl } from '../utils/session';
+import { downloadServerFile } from '../utils/download';
+import { useTelegramBackButton } from '../utils/useTelegram';
 import { useMediaToken } from '../utils/useMediaToken';
 import { 
   ShoppingBag, 
@@ -31,7 +33,7 @@ import {
   BarChart2,
   ExternalLink
 } from 'lucide-react';
-import { hapticImpact, hapticNotify } from '../utils/telegram';
+import { hapticImpact, hapticNotify, showAlert, showConfirm } from '../utils/telegram';
 import { fireConfetti } from '../utils/confetti';
 
 export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
@@ -70,6 +72,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isCapabilitiesModalOpen, setIsCapabilitiesModalOpen] = useState(false);
   const [labelModalOrder, setLabelModalOrder] = useState(null);
+  useTelegramBackButton(isCapabilitiesModalOpen, () => setIsCapabilitiesModalOpen(false));
+  useTelegramBackButton(Boolean(labelModalOrder), () => setLabelModalOrder(null));
   const [feedbackMsg, setFeedbackMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -94,71 +98,39 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
 
   const isUz = lang === 'uz';
 
+  // All seven requests run at once; one failing request does not hide the rest
+  const fetchUzumData = async () => {
+    setIsLoading(true);
+    const get = async (url) => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`${url}: ${res.status}`);
+      return res.json();
+    };
+    const results = await Promise.allSettled([
+      get('/api/uzum/settings'), get('/api/uzum/shops'), get('/api/uzum/orders'), get('/api/uzum/stocks'),
+      get('/api/uzum/finance'), get('/api/uzum/margin-guard'), get('/api/uzum/fbo/forecast'),
+    ]);
+    const [settingsR, shopsR, ordersR, stocksR, financeR, marginR, fboR] = results;
+    if (settingsR.status === 'fulfilled') setSettings(settingsR.value);
+    if (shopsR.status === 'fulfilled') setShops(shopsR.value.shops || []);
+    if (ordersR.status === 'fulfilled') setOrders(ordersR.value.orders || []);
+    if (stocksR.status === 'fulfilled') setStocks(stocksR.value.stocks || []);
+    if (financeR.status === 'fulfilled') setFinance(financeR.value);
+    if (marginR.status === 'fulfilled') setMarginData(marginR.value);
+    if (fboR.status === 'fulfilled') setFboForecast(fboR.value.forecast || []);
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length) {
+      console.error('Uzum data requests failed:', failed.map((r) => r.reason?.message));
+      setErrorMsg(t.ui_tabuzum_1);
+    }
+    setIsLoading(false);
+  };
+
   // Load initial settings and data
   useEffect(() => {
     fetchUzumData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once on mount
   }, []);
-
-  const fetchUzumData = async () => {
-    setIsLoading(true);
-    try {
-      // 1. Settings
-      const setRes = await fetch('/api/uzum/settings');
-      if (setRes.ok) {
-        const sData = await setRes.json();
-        setSettings(sData);
-        if (sData.api_key && !sData.is_demo) {
-          setApiKeyInput(sData.api_key);
-        }
-      }
-
-      // 2. Shops
-      const shopRes = await fetch('/api/uzum/shops');
-      if (shopRes.ok) {
-        const shData = await shopRes.json();
-        setShops(shData.shops || []);
-      }
-
-      // 3. Orders
-      const ordRes = await fetch('/api/uzum/orders');
-      if (ordRes.ok) {
-        const oData = await ordRes.json();
-        setOrders(oData.orders || []);
-      }
-
-      // 4. Stocks
-      const stkRes = await fetch('/api/uzum/stocks');
-      if (stkRes.ok) {
-        const stData = await stkRes.json();
-        setStocks(stData.stocks || []);
-      }
-
-      // 5. Finance
-      const finRes = await fetch('/api/uzum/finance');
-      if (finRes.ok) {
-        const fData = await finRes.json();
-        setFinance(fData);
-      }
-
-      // 6. Margin Guard
-      const mgRes = await fetch('/api/uzum/margin-guard');
-      if (mgRes.ok) {
-        const mgData = await mgRes.json();
-        setMarginData(mgData);
-      }
-
-      // 7. FBO Forecast
-      const fboRes = await fetch('/api/uzum/fbo/forecast');
-      if (fboRes.ok) {
-        const fboData = await fboRes.json();
-        setFboForecast(fboData.forecast || []);
-      }
-    } catch (err) {
-      console.error('Error fetching Uzum data:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleSyncNow = async () => {
     hapticImpact('medium');
@@ -166,13 +138,12 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
     setErrorMsg('');
     try {
       const res = await fetch('/api/uzum/sync-now', { method: 'POST' });
-      if (res.ok) {
-        await fetchUzumData();
-        setFeedbackMsg(isUz ? "Ma'lumotlar muvaffaqiyatli yangilandi!" : 'Данные успешно синхронизированы!');
-        setTimeout(() => setFeedbackMsg(''), 3000);
-      }
-    } catch (err) {
-      setErrorMsg(isUz ? 'Sinxronlashda xatolik' : 'Ошибка синхронизации');
+      if (!res.ok) throw new Error(String(res.status));
+      await fetchUzumData();
+      setFeedbackMsg(t.ui_tabuzum_2);
+      setTimeout(() => setFeedbackMsg(''), 3000);
+    } catch {
+      setErrorMsg(t.ui_tabuzum_3);
     } finally {
       setIsSyncing(false);
     }
@@ -204,8 +175,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
       setSubTab('orders');
       setFeedbackMsg(
         isDemo
-          ? (isUz ? "✨ Uzum Demo rejimi ulandi (2 ta do'kon)!" : '✨ Демо-режим Uzum подключен (2 магазина)!')
-          : (isUz ? "🟢 Uzum API muvaffaqiyatli ulandi!" : '🟢 Uzum API успешно подключен!')
+          ? (t.ui_tabuzum_4)
+          : (t.ui_tabuzum_5)
       );
       setTimeout(() => setFeedbackMsg(''), 4000);
     } catch (err) {
@@ -218,14 +189,14 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
 
   // Disconnect
   const handleDisconnect = async () => {
-    if (!window.confirm(isUz ? "Haqiqatan ham Uzum API'ni uzmoqchimisiz?" : 'Действительно отключить интеграцию Uzum?')) {
+    if (!(await showConfirm(t.ui_tabuzum_6))) {
       return;
     }
     hapticImpact('medium');
     try {
       await fetch('/api/uzum/settings', { method: 'DELETE' });
       await fetchUzumData();
-      setFeedbackMsg(isUz ? "Uzum API uzildi" : 'Uzum API отключен');
+      setFeedbackMsg(t.ui_tabuzum_7);
       setTimeout(() => setFeedbackMsg(''), 3000);
     } catch (err) {
       console.error(err);
@@ -250,17 +221,17 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         setFeedbackMsg(isUz ? `✅ Buyurtma #${orderId} tasdiqlandi!` : `✅ Заказ #${orderId} успешно подтверждён!`);
         setTimeout(() => setFeedbackMsg(''), 3500);
       } else {
-        const err = await res.json();
-        alert(err.detail || 'Ошибка подтверждения');
+        const err = await res.json().catch(() => ({}));
+        showAlert(err.detail || (t.ui_tabuzum_8));
       }
-    } catch (err) {
-      alert('Ошибка соединения');
+    } catch {
+      showAlert(t.ui_tabuzum_9);
     }
   };
 
   // Cancel FBS order
   const handleCancelOrder = async (orderId) => {
-    if (!window.confirm(isUz ? `Buyurtma #${orderId} bekor qilinsinmi?` : `Отменить заказ #${orderId}?`)) {
+    if (!(await showConfirm(isUz ? `Buyurtma #${orderId} bekor qilinsinmi?` : `Отменить заказ #${orderId}?`))) {
       return;
     }
     hapticImpact('medium');
@@ -346,7 +317,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
       });
       if (res.ok) {
         hapticNotify('success');
-        setFeedbackMsg(isUz ? "Tannarx muvaffaqiyatli saqlandi!" : 'Себестоимость обновлена!');
+        setFeedbackMsg(t.ui_tabuzum_10);
         setEditingCost(prev => {
           const next = { ...prev };
           delete next[skuId];
@@ -358,7 +329,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         setTimeout(() => setFeedbackMsg(''), 3000);
       }
     } catch (err) {
-      setErrorMsg(isUz ? 'Tannarxni saqlashda xatolik' : 'Ошибка сохранения себестоимости');
+      setErrorMsg(t.ui_tabuzum_11);
     }
   };
 
@@ -395,16 +366,14 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         fireConfetti();
         hapticNotify('success');
         setFeedbackMsg(
-          isUz
-            ? "🏬 Telegram'ga FBO zaxira ogohlantirishi yuborildi!"
-            : '🏬 FBO-алерт успешно отправлен в Telegram!'
+          t.ui_tabuzum_12
         );
         setTimeout(() => setFeedbackMsg(''), 4000);
       } else {
-        setErrorMsg(data.detail || (isUz ? 'Xatolik yuz berdi' : 'Ошибка отправки алерта'));
+        setErrorMsg(data.detail || (t.ui_tabuzum_13));
       }
     } catch (err) {
-      setErrorMsg(isUz ? 'Telegramga ulanish xatosi' : 'Ошибка связи с Telegram');
+      setErrorMsg(t.ui_tabuzum_14);
     } finally {
       setTestingAlertSku(null);
     }
@@ -413,12 +382,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
   // Feature 2: Download 58x40 mm thermal label PNG
   const handleDownloadLabelPng = async (orderId, postingNumber) => {
     hapticImpact('light');
-    const a = document.createElement('a');
-    a.href = await mediaUrl(`/api/uzum/orders/${orderId}/label.png`);
-    a.download = `uzum-label-${postingNumber || orderId}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    await downloadServerFile(`/api/uzum/orders/${orderId}/label.png`, `uzum-label-${postingNumber || orderId}.png`);
   };
 
   // Send Test Push
@@ -437,10 +401,10 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         setTimeout(() => setFeedbackMsg(''), 4000);
       } else {
         const err = await res.json();
-        alert(err.detail || 'Не удалось отправить');
+        showAlert(err.detail || (t.ui_tabuzum_15));
       }
     } catch (err) {
-      alert('Ошибка соединения');
+      showAlert(t.ui_tabuzum_16);
     }
   };
 
@@ -582,7 +546,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
           >
             <Store className="w-3.5 h-3.5" />
             <span>{t.uzum_all_shops}</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+            <span className={`px-1.5 py-0.2 rounded-full text-xs font-extrabold ${
               selectedShopId === 0 ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
             }`}>
               {orders.length}
@@ -608,11 +572,11 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
               >
                 <span>{s.title}</span>
                 {pendingCnt > 0 ? (
-                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-amber-500 text-white animate-pulse">
+                  <span className="px-1.5 py-0.2 rounded-full text-xs font-extrabold bg-amber-500 text-white animate-pulse">
                     {pendingCnt}
                   </span>
                 ) : (
-                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                  <span className={`px-1.5 py-0.2 rounded-full text-xs font-extrabold ${
                     isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                   }`}>
                     {shopOrdersCnt}
@@ -641,7 +605,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         >
           <span>{t.uzum_tab_orders}</span>
           {pendingOrdersCount > 0 && (
-            <span className="w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-black flex items-center justify-center">
+            <span className="w-4 h-4 rounded-full bg-amber-500 text-white text-xs font-black flex items-center justify-center">
               {pendingOrdersCount}
             </span>
           )}
@@ -658,9 +622,9 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
               : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
           }`}
         >
-          <span>{isUz ? "Marja" : "Маржа"}</span>
+          <span>{t.ui_tabuzum_17}</span>
           {lowStockCount > 0 && (
-            <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center">
+            <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-xs font-black flex items-center justify-center">
               !
             </span>
           )}
@@ -679,7 +643,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
         >
           <span>FBO</span>
           {criticalFboCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-black animate-pulse">
+            <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-xs font-black animate-pulse">
               {criticalFboCount}
             </span>
           )}
@@ -722,11 +686,11 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
           {/* Status Filter Chips */}
           <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar py-0.5">
             {[
-              { id: 'ALL', label: isUz ? 'Barchasi' : 'Все' },
-              { id: 'CREATED', label: isUz ? "Yangi (Tasdiqlash)" : 'Новые', badge: pendingOrdersCount },
-              { id: 'CONFIRMED', label: isUz ? "Yig'ilmoqda" : 'В сборке' },
-              { id: 'DELIVERING', label: isUz ? "Yetkazilmoqda" : 'В пути' },
-              { id: 'COMPLETED', label: isUz ? "Yakunlangan" : 'Завершены' },
+              { id: 'ALL', label: t.ui_tabuzum_18 },
+              { id: 'CREATED', label: t.ui_tabuzum_19, badge: pendingOrdersCount },
+              { id: 'CONFIRMED', label: t.ui_tabuzum_20 },
+              { id: 'DELIVERING', label: t.ui_tabuzum_21 },
+              { id: 'COMPLETED', label: t.ui_tabuzum_22 },
             ].map(f => {
               const isAct = orderStatusFilter === f.id;
               return (
@@ -744,7 +708,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 >
                   <span>{f.label}</span>
                   {f.badge > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full text-[9px] font-extrabold bg-amber-500 text-white">
+                    <span className="px-1.5 py-0.2 rounded-full text-xs font-extrabold bg-amber-500 text-white">
                       {f.badge}
                     </span>
                   )}
@@ -794,11 +758,11 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                           <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
                             #{order.order_id}
                           </span>
-                          <span className="text-[10px] font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800/40">
+                          <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded-md border border-purple-200 dark:border-purple-800/40">
                             {order.shop_title || "Uzum Do'kon"}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
+                        <p className="text-[11px] text-slate-500 mt-0.5">
                           {order.posting_number} · {order.delivery_city}
                         </p>
                       </div>
@@ -827,7 +791,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                           <span>{t.uzum_deadline_confirm}:</span>
                         </div>
                         <span className="font-extrabold text-amber-700 dark:text-amber-300">
-                          {isUz ? "2 soat ichida" : "в течение 2 часов"}
+                          {t.ui_tabuzum_23}
                         </span>
                       </div>
                     )}
@@ -849,8 +813,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                     {/* Total Amount & Actions */}
                     <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
                       <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block leading-none">
-                          {isUz ? "Jami summa" : "Общая сумма"}
+                        <span className="text-xs text-slate-500 uppercase font-bold block leading-none">
+                          {t.ui_tabuzum_24}
                         </span>
                         <span className="text-sm font-black text-purple-700 dark:text-purple-400">
                           {order.total_amount.toLocaleString()} {t.currency}
@@ -878,13 +842,13 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                           title={t.uzum_print_label_btn}
                         >
                           <Printer className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">{isUz ? "Etiketka" : "Этикетка"}</span>
+                          <span className="hidden sm:inline">{t.ui_tabuzum_25}</span>
                         </button>
 
                         {isPending && (
                           <button
                             onClick={() => handleCancelOrder(order.order_id)}
-                            className="p-1.5 rounded-xl text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                            className="p-1.5 rounded-xl text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
                             title={t.uzum_cancel_btn}
                           >
                             <XCircle className="w-4 h-4" />
@@ -914,16 +878,16 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 </div>
                 <div>
                   <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 flex items-center space-x-1.5">
-                    <span>{isUz ? "Uzum Marja Nazorati (Margin & Fee Guard)" : "Контроль маржи Uzum (Margin Guard)"}</span>
+                    <span>{t.ui_tabuzum_26}</span>
                   </h4>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                    {isUz ? "Uzum komissiyasi (13%), logistika (12 000) va 1% soliq hisoblangan" : "С учётом комиссии 13%, логистики 12 000 сум и налога 1%"}
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {t.ui_tabuzum_27}
                   </p>
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-[9px] uppercase tracking-wider text-slate-400 block font-bold">
-                  {isUz ? "O'rtacha marja" : "Ср. маржинальность"}
+                <span className="text-xs uppercase tracking-wider text-slate-500 block font-bold">
+                  {t.ui_tabuzum_28}
                 </span>
                 <span className="text-sm font-black text-emerald-600 dark:text-emerald-400">
                   {marginData.avg_margin_pct || 0}%
@@ -932,15 +896,15 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
             </div>
 
             {/* Chips */}
-            <div className="grid grid-cols-3 gap-1.5 text-center text-[10px] font-bold">
+            <div className="grid grid-cols-3 gap-1.5 text-center text-xs font-bold">
               <div className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 py-1 px-1.5 rounded-lg">
-                🟢 {isUz ? "Sog'lom" : "Здоровая"}: {marginData.healthy_count || 0}
+                🟢 {t.ui_tabuzum_29}: {marginData.healthy_count || 0}
               </div>
               <div className="bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 py-1 px-1.5 rounded-lg">
-                🟡 {isUz ? "Chegara" : "Низкая"}: {marginData.tight_count || 0}
+                🟡 {t.ui_tabuzum_30}: {marginData.tight_count || 0}
               </div>
               <div className="bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800/60 py-1 px-1.5 rounded-lg">
-                🔴 {isUz ? "Xavfli" : "Убыток"}: {marginData.danger_count || 0}
+                🔴 {t.ui_tabuzum_31}: {marginData.danger_count || 0}
               </div>
             </div>
           </div>
@@ -960,7 +924,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
 
           {/* Search bar */}
           <div className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+            <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
             <input
               type="text"
               value={searchQuery}
@@ -995,46 +959,46 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="flex items-center space-x-1.5">
-                        <span className="text-[10px] font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800/40">
+                        <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800/40">
                           {sku.shop_title}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono">
+                        <span className="text-xs text-slate-500 font-mono">
                           SKU #{sku.sku_id}
                         </span>
                       </div>
                       <h3 className="text-xs font-bold text-slate-800 dark:text-slate-100 mt-1">
                         {sku.product_title}
                       </h3>
-                      <p className="text-[10px] text-slate-400">
+                      <p className="text-xs text-slate-500">
                         {t.uzum_barcode}: {sku.barcode}
                       </p>
                     </div>
 
                     <div className="flex flex-col items-end space-y-1">
                       {sku.is_low_stock ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
                           {t.uzum_stock_low_badge}
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
                           OK
                         </span>
                       )}
 
                       {/* Margin status badge */}
                       {mgItem.margin_status === 'HEALTHY' && (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                          🟢 +{mgItem.margin_pct}% {isUz ? "marja" : "маржа"}
+                        <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          🟢 +{mgItem.margin_pct}% {t.ui_tabuzum_32}
                         </span>
                       )}
                       {mgItem.margin_status === 'TIGHT' && (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                          🟡 +{mgItem.margin_pct}% {isUz ? "diqqat" : "мало"}
+                        <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                          🟡 +{mgItem.margin_pct}% {t.ui_tabuzum_33}
                         </span>
                       )}
                       {mgItem.margin_status === 'DANGER' && (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 animate-pulse">
-                          🔴 {mgItem.margin_pct}% {isUz ? "zarar xavfi" : "риск убытка"}
+                        <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 animate-pulse">
+                          🔴 {mgItem.margin_pct}% {t.ui_tabuzum_34}
                         </span>
                       )}
                     </div>
@@ -1044,7 +1008,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                   <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                     {/* Stock counter */}
                     <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl border border-slate-200 dark:border-slate-700/60">
-                      <span className="text-[10px] text-slate-500 font-bold block mb-1">
+                      <span className="text-xs text-slate-500 font-bold block mb-1">
                         {t.uzum_stock_qty}
                       </span>
                       <div className="flex items-center space-x-1.5">
@@ -1075,7 +1039,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                         {isStockChanged && (
                           <button
                             onClick={() => handleSaveStock(sku.sku_id, currentStockVal)}
-                            className="px-2 py-1 rounded bg-purple-600 text-white text-[10px] font-bold shadow-sm"
+                            className="px-2 py-1 rounded bg-purple-600 text-white text-xs font-bold shadow-sm"
                           >
                             ✓
                           </button>
@@ -1085,7 +1049,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
 
                     {/* Price editor */}
                     <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl border border-slate-200 dark:border-slate-700/60">
-                      <span className="text-[10px] text-slate-500 font-bold block mb-1">
+                      <span className="text-xs text-slate-500 font-bold block mb-1">
                         {t.uzum_price_label}
                       </span>
                       <div className="flex items-center space-x-1">
@@ -1101,7 +1065,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                         {isPriceChanged && (
                           <button
                             onClick={() => handleSavePrice(sku.sku_id, currentPriceVal)}
-                            className="px-2 py-1 rounded bg-purple-600 text-white text-[10px] font-bold shadow-sm"
+                            className="px-2 py-1 rounded bg-purple-600 text-white text-xs font-bold shadow-sm"
                           >
                             ✓
                           </button>
@@ -1111,8 +1075,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
 
                     {/* Cost Price editor */}
                     <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl border border-slate-200 dark:border-slate-700/60">
-                      <span className="text-[10px] text-slate-500 font-bold block mb-1">
-                        {isUz ? "Tannarxi (Себест.)" : "Себестоимость"}
+                      <span className="text-xs text-slate-500 font-bold block mb-1">
+                        {t.ui_tabuzum_35}
                       </span>
                       <div className="flex items-center space-x-1">
                         <input
@@ -1127,8 +1091,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                         {isCostChanged && (
                           <button
                             onClick={() => handleSaveCostPrice(sku.sku_id, currentCostVal)}
-                            className="px-2 py-1 rounded bg-emerald-600 text-white text-[10px] font-bold shadow-sm"
-                            title={isUz ? "Saqlash" : "Сохранить"}
+                            className="px-2 py-1 rounded bg-emerald-600 text-white text-xs font-bold shadow-sm"
+                            title={t.ui_tabuzum_36}
                           >
                             ✓
                           </button>
@@ -1148,11 +1112,11 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                     >
                       <span className="flex items-center space-x-1.5">
                         <Calculator className="w-3.5 h-3.5 text-purple-600" />
-                        <span>{isUz ? "Batafsil marja va xarajatlar" : "Юнит-экономика и комиссии"}</span>
+                        <span>{t.ui_tabuzum_37}</span>
                       </span>
                       <div className="flex items-center space-x-1">
                         <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">
-                          {isUz ? "Sof foyda:" : "Чистыми:"} +{(mgItem.net_profit || 0).toLocaleString()} {t.currency}
+                          {t.ui_tabuzum_38} +{(mgItem.net_profit || 0).toLocaleString()} {t.currency}
                         </span>
                         {isMarginExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                       </div>
@@ -1161,27 +1125,27 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                     {isMarginExpanded && (
                       <div className="mt-2 p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-1.5 text-[11px] animate-fade-in">
                         <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                          <span>{isUz ? "Sotuv narxi:" : "Цена продажи:"}</span>
+                          <span>{t.ui_tabuzum_39}</span>
                           <span className="font-bold text-slate-900 dark:text-white">{(mgItem.price || sku.price).toLocaleString()} {t.currency}</span>
                         </div>
                         <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                          <span>{isUz ? "Tannarxi (chiqim):" : "Себестоимость:"}</span>
+                          <span>{t.ui_tabuzum_40}</span>
                           <span className="font-bold text-rose-600">-{(mgItem.cost_price || 0).toLocaleString()} {t.currency}</span>
                         </div>
                         <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                          <span>{isUz ? "Uzum komissiyasi (~13%):" : "Комиссия Uzum (~13%):"}</span>
+                          <span>{t.ui_tabuzum_41}</span>
                           <span className="font-bold text-rose-600">-{(mgItem.commission_est || 0).toLocaleString()} {t.currency}</span>
                         </div>
                         <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                          <span>{isUz ? "Uzum logistika to'lovi:" : "Логистика Uzum:"}</span>
+                          <span>{t.ui_tabuzum_42}</span>
                           <span className="font-bold text-rose-600">-{(mgItem.logistics_fee || 12000).toLocaleString()} {t.currency}</span>
                         </div>
                         <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                          <span>{isUz ? "1% aylanmadan soliq:" : "Налог с оборота 1%:"}</span>
+                          <span>{t.ui_tabuzum_43}</span>
                           <span className="font-bold text-rose-600">-{(mgItem.tax_1pct || 0).toLocaleString()} {t.currency}</span>
                         </div>
                         <div className="pt-1.5 border-t border-slate-200 dark:border-slate-700 flex justify-between font-black text-xs">
-                          <span className="text-slate-900 dark:text-white">{isUz ? "1 donadan sof foyda:" : "Чистая прибыль с 1 шт:"}</span>
+                          <span className="text-slate-900 dark:text-white">{t.ui_tabuzum_44}</span>
                           <span className="text-emerald-600 dark:text-emerald-400">
                             +{(mgItem.net_profit || 0).toLocaleString()} {t.currency} ({mgItem.margin_pct}%)
                           </span>
@@ -1189,9 +1153,9 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
 
                         {mgItem.recommended_price && mgItem.margin_status !== 'HEALTHY' && (
                           <div className="mt-2 pt-2 border-t border-dashed border-amber-300 dark:border-amber-700/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-lg">
-                            <div className="text-[10px] text-amber-900 dark:text-amber-200">
+                            <div className="text-xs text-amber-900 dark:text-amber-200">
                               <span className="font-bold block">
-                                {isUz ? "Xavfsiz narx (25% marja uchun):" : "Безопасная цена (маржа 25%):"}
+                                {t.ui_tabuzum_45}
                               </span>
                               <span className="font-extrabold text-xs text-purple-700 dark:text-purple-300">
                                 {mgItem.recommended_price.toLocaleString()} {t.currency}
@@ -1199,9 +1163,9 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                             </div>
                             <button
                               onClick={() => handleApplyRecommendedPrice(sku.sku_id, mgItem.recommended_price)}
-                              className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold shadow-sm active:scale-95 transition-all"
+                              className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-sm active:scale-95 transition-all"
                             >
-                              {isUz ? "Narxni o'rnatish" : "Установить"}
+                              {t.ui_tabuzum_46}
                             </button>
                           </div>
                         )}
@@ -1229,12 +1193,10 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-xs tracking-tight">
-                    {isUz ? "🏬 Uzum FBO: Omborga Yetkazib Berish (Поставки)" : "🏬 Uzum FBO: Поставки на центральный склад"}
+                    {t.ui_tabuzum_47}
                   </h3>
-                  <p className="text-[10px] text-purple-200/90 leading-tight">
-                    {isUz 
-                      ? "FBO rejimida tovarlar Uzum omborida saqlanadi. AI zaxira tugashini oldindan hisoblaydi."
-                      : "Умный предиктивный расчёт остатков на складе Uzum во избежание обнуления карточки."
+                  <p className="text-xs text-purple-200/90 leading-tight">
+                    {t.ui_tabuzum_48
                     }
                   </p>
                 </div>
@@ -1245,7 +1207,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 rel="noreferrer"
                 className="px-2.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-[11px] font-bold flex items-center space-x-1 transition-all"
               >
-                <span>{isUz ? "Nakladnaya" : "Накладная"}</span>
+                <span>{t.ui_tabuzum_49}</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>
@@ -1274,10 +1236,10 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="flex items-center space-x-1.5">
-                        <span className="text-[10px] font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800/40">
+                        <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/80 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800/40">
                           {item.shop_title}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-mono">
+                        <span className="text-xs text-slate-500 font-mono">
                           SKU #{item.sku_id}
                         </span>
                       </div>
@@ -1287,17 +1249,17 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                     </div>
 
                     {isCritical ? (
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 animate-pulse flex items-center space-x-1">
+                      <span className="px-2.5 py-1 rounded-full text-xs font-black bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 animate-pulse flex items-center space-x-1">
                         <AlertTriangle className="w-3 h-3" />
-                        <span>{isUz ? "Kritik holat!" : "Критично!"}</span>
+                        <span>{t.ui_tabuzum_50}</span>
                       </span>
                     ) : isWarning ? (
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                        {isUz ? "Diqqat" : "Внимание"}
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                        {t.ui_tabuzum_51}
                       </span>
                     ) : (
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
-                        {isUz ? "Zaxira yetarli" : "Оптимально"}
+                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                        {t.ui_tabuzum_52}
                       </span>
                     )}
                   </div>
@@ -1305,8 +1267,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                   {/* Stock, Velocity & Days left indicators */}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60">
-                      <span className="text-[10px] text-slate-400 font-bold block">
-                        {isUz ? "FBO Qoldiq" : "Остаток FBO"}
+                      <span className="text-xs text-slate-500 font-bold block">
+                        {t.ui_tabuzum_53}
                       </span>
                       <span className="text-sm font-black text-slate-900 dark:text-white">
                         {item.fbo_stock} dona
@@ -1314,8 +1276,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                     </div>
 
                     <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60">
-                      <span className="text-[10px] text-slate-400 font-bold block">
-                        {isUz ? "Kunlik sotuv" : "Продаж в день"}
+                      <span className="text-xs text-slate-500 font-bold block">
+                        {t.ui_tabuzum_54}
                       </span>
                       <span className="text-sm font-black text-purple-700 dark:text-purple-300">
                         {item.daily_sales_velocity} dona
@@ -1329,11 +1291,11 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                         ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300'
                         : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
                     }`}>
-                      <span className="text-[10px] font-bold block opacity-80">
-                        {isUz ? "Zaxira muddati" : "Хватит на"}
+                      <span className="text-xs font-bold block opacity-80">
+                        {t.ui_tabuzum_55}
                       </span>
                       <span className="text-sm font-black">
-                        {daysLeft} {isUz ? "kun" : "дней"}
+                        {daysLeft} {t.ui_tabuzum_56}
                       </span>
                     </div>
                   </div>
@@ -1354,13 +1316,13 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                   <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 text-xs space-y-1">
                     <div className="flex items-center space-x-1.5 text-purple-800 dark:text-purple-300 font-extrabold text-[11px]">
                       <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                      <span>{isUz ? "Oqila AI Tavsiyasi:" : "Рекомендация Oqila AI:"}</span>
+                      <span>{t.ui_tabuzum_57}</span>
                     </div>
                     <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed">
                       {isUz ? item.tip_uz : item.tip_ru}
                     </p>
                     <div className="pt-1 text-[11px] font-extrabold text-purple-700 dark:text-purple-300 flex items-center justify-between">
-                      <span>{isUz ? "Tavsiya etilgan partiya:" : "Рекомендуемая партия:"}</span>
+                      <span>{t.ui_tabuzum_58}</span>
                       <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/60 font-black">
                         {item.recommended_reorder} dona
                       </span>
@@ -1375,7 +1337,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                       className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white text-xs font-bold shadow-md shadow-purple-500/20 flex items-center justify-center space-x-1.5 transition-all"
                     >
                       <BellRing className={`w-3.5 h-3.5 ${isAlertLoading ? 'animate-spin' : ''}`} />
-                      <span>{isUz ? "Telegram'ga ogohlantirish" : "Отправить алерт в бот"}</span>
+                      <span>{t.ui_tabuzum_59}</span>
                     </button>
                     <a
                       href="https://seller.uzum.uz/seller/invoices"
@@ -1383,7 +1345,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                       rel="noreferrer"
                       className="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center space-x-1"
                     >
-                      <span>{isUz ? "Накладная" : "Накладная"}</span>
+                      <span>{t.ui_tabuzum_60}</span>
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   </div>
@@ -1405,7 +1367,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 <h3 className="text-xs font-extrabold text-slate-800 dark:text-slate-100">
                   {t.uzum_finance_title}
                 </h3>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-slate-500">
                   {selectedShopId === 0 ? t.uzum_all_shops : shops.find(s => s.shop_id === selectedShopId)?.title}
                 </p>
               </div>
@@ -1420,7 +1382,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
               <span className="text-2xl font-black text-purple-700 dark:text-purple-300 mt-1 block">
                 {finance.net_payout.toLocaleString()} {t.currency}
               </span>
-              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 block">
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5 block">
                 {t.uzum_orders_delivered_count}: {finance.order_count} ta
               </span>
             </div>
@@ -1488,7 +1450,7 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 <button
                   type="button"
                   onClick={() => setShowApiKey(!showApiKey)}
-                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-600"
                 >
                   {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -1573,14 +1535,14 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                   <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
                     {t.uzum_api_capabilities_title}
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-slate-500">
                     Swagger OpenAPI: api-seller.uzum.uz
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setIsCapabilitiesModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-500 hover:text-slate-600"
               >
                 ✕
               </button>
@@ -1589,79 +1551,65 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
             <div className="space-y-3 text-xs max-h-[70vh] overflow-y-auto pr-1">
               <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60">
                 <h4 className="font-bold text-purple-900 dark:text-purple-200 mb-1 flex items-center justify-between">
-                  <span>📦 1. {isUz ? "FBS/DBS Buyurtmalar va SLA Rejimi" : "Работа с заказами FBS/DBS (SLA)"}</span>
-                  <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 font-mono">16 соат дедлайн</span>
+                  <span>📦 1. {t.ui_tabuzum_61}</span>
+                  <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-purple-200 dark:bg-purple-800 text-purple-800 dark:text-purple-200 font-mono">16 соат дедлайн</span>
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                  {isUz
-                    ? "Yangi buyurtmalarni avtomatik yuklash (GET /v2/fbs/orders). 16 soat ichida 'В сборку'ga o'tkazish shart. Telegram orqali 1 bosishda tasdiqlash (POST /confirm) va etiketka chop etish."
-                    : "Автоматический приём заказов (GET /v2/fbs/orders). По регламенту Uzum у селлера есть ровно 16 часов на подтверждение («В сборку»). Подтверждение в 1 клик прямо из Telegram (POST /confirm)."
+                  {t.ui_tabuzum_62
                   }
                 </p>
-                <div className="mt-2 text-[10px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2 rounded-lg border border-amber-200 dark:border-amber-800/50">
-                  ⚠️ {isUz
-                    ? "24 soatdan keyin bekor qilinsa: 9% jarima (10 000 - 360 000 so'm). Tovarni almashtirib yuborish: 100% jarima!"
-                    : "Штрафы Uzum: отмена заказа позже 24ч — 9% (от 10 000 до 360 000 сум). Подмена товара — 100% стоимости!"
+                <div className="mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2 rounded-lg border border-amber-200 dark:border-amber-800/50">
+                  ⚠️ {t.ui_tabuzum_63
                   }
                 </div>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                 <h4 className="font-bold text-slate-900 dark:text-white mb-1">
-                  🏷️ 2. {isUz ? "Etiketkalar va Shtrix-kodlar (58×40 / 43×25 mm)" : "Маркировка и Печать (58×40 / 43×25 мм)"}
+                  🏷️ 2. {t.ui_tabuzum_64}
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                  {isUz
-                    ? "Har bir jo'natmaga Uzum qoidasi bo'yicha markirovka yopishtiriladi (GET /v1/fbs/order/{id}/labels/print). O'lchamlari 58×40 mm yoki 43×25 mm. Belgisi / IMEI majburiy bo'lgan tovarlar uchun kod kiritish."
-                    : "Формирование термоэтикеток по ГОСТ Uzum (58×40 мм или 43×25 мм). Печать прямо из браузера или скачивание. Поддержка маркировок ASL Belgisi и IMEI."
+                  {t.ui_tabuzum_65
                   }
                 </p>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                 <h4 className="font-bold text-slate-900 dark:text-white mb-1">
-                  📊 3. {isUz ? "Ombor qoldiqlari (GET /v3/fbs/sku/stocks)" : "Остатки на складе (Stocks)"}
+                  📊 3. {t.ui_tabuzum_66}
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                  {isUz
-                    ? "Ombordagi qoldiqlarni real vaqtda yangilash. Qoldiq 3 tadan kamayganda avtomatik ogohlantirish (Low Stock Alert), buyurtma bekor bo'lishining oldini oladi."
-                    : "Синхронизация остатков по каждому SKU (GET /v3/fbs/sku/stocks), мгновенные предупреждения при остатке ≤ 3 шт. во избежание дефицита и штрафов."
+                  {t.ui_tabuzum_67
                   }
                 </p>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                 <h4 className="font-bold text-slate-900 dark:text-white mb-1">
-                  🏪 4. {isUz ? "Multi-Do'kon va Alohida Moliyaviy Hisob" : "Мульти-Магазины (Multi-Shop Isolation)"}
+                  🏪 4. {t.ui_tabuzum_68}
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                  {isUz
-                    ? "Bitta akkauntdagi bir nechta do'konlarni (masalan, kiyim-kechak va hunarmandchilik) mustaqil boshqarish, har bir do'kon bo'yicha buyurtmalar, komissiyalar va daromadni alohida ajratish."
-                    : "Раздельное управление магазинами на одном аккаунте. Независимый учёт заказов, остатков и финансов по каждому магазину + сводная аналитика."
+                  {t.ui_tabuzum_69
                   }
                 </p>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
                 <h4 className="font-bold text-slate-900 dark:text-white mb-1">
-                  💰 5. {isUz ? "Moliya, Komissiya va Soliq (1% YaTT)" : "Финансы, Комиссии и Налоги"}
+                  💰 5. {t.ui_tabuzum_70}
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                  {isUz
-                    ? "Uzum komissiyasi (tariflar bo'yicha, taxminan 12-15%), yetkazib berish to'lovi va 1% aylanmadan soliq hisobga olingandan keyingi sof foyda prognozi."
-                    : "Расчёт комиссии Uzum (по тарифам, примерно 12-15%), логистики и налога с оборота 1%, который продавец платит сам, — с итоговой чистой выплатой."
+                  {t.ui_tabuzum_71
                   }
                 </p>
               </div>
 
               <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60">
                 <h4 className="font-bold text-indigo-900 dark:text-indigo-200 mb-1">
-                  🔔 6. {isUz ? "Telegram Push Bildirishnomalar" : "Telegram Push-уведомления"}
+                  🔔 6. {t.ui_tabuzum_72}
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                  {isUz
-                    ? "Yangi buyurtma tushganda @oqila_ai_bot darhol xabar yuboradi, do'kon nomi, tovarlar tarkibi, 16 soatlik taymer va tasdiqlash tugmasini taqdim etadi."
-                    : "Мгновенное уведомление в Telegram при новом заказе FBS с составом, дедлайном SLA и кнопкой подтверждения без входа в кабинет."
+                  {t.ui_tabuzum_73
                   }
                 </p>
               </div>
@@ -1685,11 +1633,11 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 max-w-sm w-full shadow-2xl space-y-3 text-center">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
               <span className="text-xs font-extrabold text-slate-800 dark:text-slate-100">
-                {isUz ? "Uzum FBS Markirovka (58×40 mm)" : "Этикетка Uzum FBS (58×40 мм)"}
+                {t.ui_tabuzum_74}
               </span>
               <button
                 onClick={() => setLabelModalOrder(null)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-500 hover:text-slate-600"
               >
                 ✕
               </button>
@@ -1706,8 +1654,8 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 alt="Uzum Thermal Label 58x40 mm"
                 className="w-full max-w-[320px] rounded-xl shadow-sm border border-slate-300 dark:border-slate-700 bg-white"
               />
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2 font-mono text-center">
-                {isUz ? "Standart 58×40 mm · Vektor Shtrix-kod · 203 DPI" : "Стандарт 58×40 мм · Векторный штрих-код · 203 DPI"}
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 font-mono text-center">
+                {t.ui_tabuzum_75}
               </p>
             </div>
 
@@ -1717,12 +1665,12 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-500/20 active:scale-95 transition-all flex items-center justify-center space-x-1.5"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>{isUz ? "PNG / SVG yuklab olish" : "Скачать (58×40)"}</span>
+                <span>{t.ui_tabuzum_76}</span>
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   hapticImpact('light');
-                  const printWin = window.open(withToken(`/api/uzum/orders/${labelModalOrder.order_id}/label.svg`), '_blank');
+                  const printWin = window.open(await mediaUrl(`/api/uzum/orders/${labelModalOrder.order_id}/label.svg`), '_blank');
                   if (printWin) {
                     printWin.onload = () => printWin.print();
                   } else {
@@ -1732,13 +1680,13 @@ export default function TabUzum({ lang, t, profile, onOpenCalculator }) {
                 className="py-2 px-3 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 text-xs font-bold transition-all flex items-center justify-center space-x-1"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>{isUz ? "Chop etish" : "Печать"}</span>
+                <span>{t.ui_tabuzum_77}</span>
               </button>
               <button
                 onClick={() => setLabelModalOrder(null)}
                 className="py-2 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-bold"
               >
-                {isUz ? "Yopish" : "Закрыть"}
+                {t.ui_tabuzum_78}
               </button>
             </div>
           </div>

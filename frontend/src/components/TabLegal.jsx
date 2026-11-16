@@ -174,15 +174,15 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
 
       {/* User Profile Context Badge */}
       {profile && (
-        <div className="flex items-center justify-between p-2.5 px-3.5 rounded-2xl bg-brand-50/80 dark:bg-teal-950/30 border border-brand-200/80 dark:border-teal-800/60 shadow-xs text-xs">
+        <div className="flex items-center justify-between p-2.5 px-3.5 rounded-2xl bg-brand-50/80 dark:bg-teal-950/30 border border-brand-200/80 dark:border-teal-800/60 shadow-sm text-xs">
           <div className="flex items-center space-x-2 truncate">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
             <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
               {profile.name} • {profile.status === 'self_employed' 
-                ? (lang === 'uz' ? "O'z-o'zini band qilish" : "Самозанятая") 
+                ? (t.ui_tablegal_1) 
                 : profile.status === 'yatt'
-                ? (lang === 'uz' ? "YaTT" : "ЯТТ")
-                : (lang === 'uz' ? "Rejalashtirish" : "Выбор статуса")}
+                ? (t.ui_tablegal_2)
+                : (t.ui_tablegal_3)}
             </span>
           </div>
           <button
@@ -190,7 +190,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
             onClick={onOpenProfile}
             className="text-[11px] font-bold text-brand-700 dark:text-teal-300 hover:text-brand-900 dark:hover:text-teal-100 underline decoration-dotted flex-shrink-0 ml-2"
           >
-            {lang === 'uz' ? "O'zgartirish" : "Настроить"}
+            {t.ui_tablegal_4}
           </button>
         </div>
       )}
@@ -200,7 +200,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
         <div className="flex items-center space-x-2 px-1">
           <BookOpen className="w-4 h-4 text-brand-600 dark:text-teal-400" />
           <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-            {lang === 'uz' ? 'Poshagoma qo\'llanma — rasmiy tartiblar' : 'Пошаговые инструкции — официальные процедуры'}
+            {t.ui_tablegal_5}
           </h3>
         </div>
 
@@ -233,7 +233,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                   <div className="flex-1 min-w-0">
                     <h4 className="font-bold text-xs text-slate-900 dark:text-white leading-snug">{item.title}</h4>
                     <div className="flex items-center space-x-1.5 mt-0.5 flex-wrap gap-y-0.5">
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md border ${colors.badge}`}>
+                      <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-md border ${colors.badge}`}>
                         {item.badge}
                       </span>
                     </div>
@@ -241,9 +241,9 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                 </div>
                 <div className="flex items-center space-x-1.5 flex-shrink-0 ml-2">
                   {isOpen ? (
-                    <ChevronUp className="w-4 h-4 text-slate-400" />
+                    <ChevronUp className="w-4 h-4 text-slate-500" />
                   ) : (
-                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                    <ChevronDown className="w-4 h-4 text-slate-500" />
                   )}
                 </div>
               </button>
@@ -255,11 +255,11 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                   <div className="flex items-center space-x-3 flex-wrap gap-y-1.5">
                     <div className="flex items-center space-x-1 text-[11px] text-slate-500 dark:text-slate-400">
                       <Clock className="w-3.5 h-3.5" />
-                      <span><span className="font-bold text-slate-700 dark:text-slate-300">{lang === 'uz' ? 'Muddat:' : 'Срок:'}</span> {item.timeline}</span>
+                      <span><span className="font-bold text-slate-700 dark:text-slate-300">{t.ui_tablegal_6}</span> {item.timeline}</span>
                     </div>
                     <div className="flex items-center space-x-1 text-[11px] text-slate-500 dark:text-slate-400">
                       <Banknote className="w-3.5 h-3.5" />
-                      <span><span className="font-bold text-slate-700 dark:text-slate-300">{lang === 'uz' ? 'Narxi:' : 'Стоимость:'}</span> {item.fee}</span>
+                      <span><span className="font-bold text-slate-700 dark:text-slate-300">{t.ui_tablegal_7}</span> {item.fee}</span>
                     </div>
                   </div>
 
@@ -267,7 +267,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                   <ol className="space-y-2">
                     {item.steps.map((step, idx) => (
                       <li key={idx} className="flex items-start space-x-2.5 text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-                        <span className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${colors.bg} ${colors.text} mt-0.5`}>
+                        <span className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs font-black ${colors.bg} ${colors.text} mt-0.5`}>
                           {idx + 1}
                         </span>
                         <span>{step}</span>
@@ -294,7 +294,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                     <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 flex items-start space-x-2 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
                       <Scale className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-slate-500 dark:text-slate-400" />
                       <div>
-                        <span className="font-bold text-slate-700 dark:text-slate-200">{lang === 'uz' ? 'Huquqiy asos:' : 'Правовое основание:'} </span>
+                        <span className="font-bold text-slate-700 dark:text-slate-200">{t.ui_tablegal_8} </span>
                         <span>{item.law}</span>
                       </div>
                     </div>
@@ -303,8 +303,8 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                   {/* Official Links */}
                   {item.links?.length > 0 && (
                     <div className="space-y-1.5 pt-1">
-                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                        {lang === 'uz' ? 'Rasmiy manbalar' : 'Официальные источники'}
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                        {t.ui_tablegal_9}
                       </span>
                       <div className="flex flex-wrap gap-2">
                         {item.links.map((link, idx) => (
@@ -339,7 +339,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
             </div>
             <div>
               <p className="text-xs font-bold leading-none">{t.chat_title}</p>
-              <p className="text-[10px] text-slate-400 mt-0.5">{t.chat_subtitle}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{t.chat_subtitle}</p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
@@ -347,8 +347,8 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
             <button
               type="button"
               onClick={clearChat}
-              title={lang === 'uz' ? 'Suhbatni tozalash' : 'Очистить чат'}
-              aria-label={lang === 'uz' ? 'Suhbatni tozalash' : 'Очистить чат'}
+              title={t.ui_tablegal_10}
+              aria-label={t.ui_tablegal_11}
               className="text-slate-300 hover:text-white transition-colors min-w-11 min-h-11 flex items-center justify-center rounded-lg hover:bg-white/10"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -386,7 +386,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
                 {/* No raw HTML: the user's words are plain text, the answer is rendered by LegalAnswerCard */}
                 {m.role === 'user' && <div className="whitespace-pre-line">{m.text}</div>}
                 {m.answer && (
-                  <LegalAnswerCard message={m} lang={lang} t={t} isLast={idx === lastAssistantIndex} onFollowUp={handleSend} onRate={rateAnswer} />
+                  <LegalAnswerCard message={m} t={t} isLast={idx === lastAssistantIndex} onFollowUp={handleSend} onRate={rateAnswer} />
                 )}
                 {m.error && (
                   <div className="space-y-2">
@@ -400,12 +400,12 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
           ))}
 
           {isSending && (
-            <div className="flex items-center space-x-2 text-slate-400 text-xs py-1">
+            <div className="flex items-center space-x-2 text-slate-500 text-xs py-1">
               <div className="w-2 h-2 rounded-full bg-brand-500 animate-bounce" />
               <div className="w-2 h-2 rounded-full bg-brand-500 animate-bounce [animation-delay:0.2s]" />
               <div className="w-2 h-2 rounded-full bg-brand-500 animate-bounce [animation-delay:0.4s]" />
               <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                OqilaLegal {lang === 'uz' ? 'javob tayyorlamoqda...' : 'формулирует ответ...'}
+                OqilaLegal {t.ui_tablegal_12}
               </span>
             </div>
           )}
@@ -448,7 +448,7 @@ export default function TabLegal({ lang, t, profile, onOpenProfile }) {
         </div>
 
         {/* AI Disclaimer Footer */}
-        <div className="px-3 py-2 bg-amber-50/70 dark:bg-amber-950/30 border-t border-amber-200/50 dark:border-amber-900/30 flex items-start space-x-2 text-[10px] text-amber-900/90 dark:text-amber-200/80 leading-normal">
+        <div className="px-3 py-2 bg-amber-50/70 dark:bg-amber-950/30 border-t border-amber-200/50 dark:border-amber-900/30 flex items-start space-x-2 text-xs text-amber-900/90 dark:text-amber-200/80 leading-normal">
           <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
           <p className="flex-1">
             {t.legal_disclaimer_chat}

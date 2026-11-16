@@ -2,6 +2,8 @@
  * adminApi.js — Administrative API client with session key handling
  */
 
+import { downloadFile } from '../../utils/telegram';
+
 const KEY_STORAGE = 'oqila_admin_key';
 
 /** Telegram initData: inside the bot's WebApp an administrator is recognised without any key. */
@@ -59,6 +61,12 @@ export function hasAdminCredentials() {
   return Boolean(getAdminKey() || getTelegramInitData());
 }
 
+// AdminApp registers what happens when the server refuses the credentials: back to the sign-in screen.
+let unauthorizedHandler = null;
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = fn;
+}
+
 export async function adminFetch(endpoint, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -73,6 +81,7 @@ export async function adminFetch(endpoint, options = {}) {
 
   if (res.status === 403 || res.status === 503) {
     clearAdminKey();
+    unauthorizedHandler?.();
     throw new Error('UNAUTHORIZED');
   }
 
@@ -130,36 +139,26 @@ export async function fetchAdminCards({ limit = 50, offset = 0, userId = null } 
   return adminFetch(`/api/admin/cards?${params.toString()}`);
 }
 
-export async function downloadUsersCsv() {
-  const res = await fetch('/api/admin/export/users.csv', {
-    headers: adminHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to download CSV');
-  const blob = await res.blob();
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `oqila_users_${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
+/**
+ * CSV files are downloaded by URL, so Telegram's own downloader or the share sheet can save them: the admin key
+ * cannot go into a URL, so the server hands out a 10-minute export token for it.
+ */
+async function downloadCsv(path, name) {
+  const { export_token: token } = await adminFetch('/api/admin/export-token', { method: 'POST' });
+  const result = await downloadFile(`${path}?et=${encodeURIComponent(token)}`, `${name}_${new Date().toISOString().slice(0, 10)}.csv`);
+  return result;
 }
 
-export async function downloadCardsCsv() {
-  const res = await fetch('/api/admin/export/cards.csv', {
-    headers: adminHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to download Cards CSV');
-  const blob = await res.blob();
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `oqila_cards_${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
+export function downloadUsersCsv() {
+  return downloadCsv('/api/admin/export/users.csv', 'oqila_users');
+}
+
+export function downloadCardsCsv() {
+  return downloadCsv('/api/admin/export/cards.csv', 'oqila_cards');
+}
+
+export function fetchAdminLegalFeedback({ limit = 100, offset = 0 } = {}) {
+  return adminFetch(`/api/admin/legal-feedback?limit=${limit}&offset=${offset}`);
 }
 
 /**

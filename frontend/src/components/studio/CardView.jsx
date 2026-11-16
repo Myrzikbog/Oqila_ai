@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, Info, Loader2, Scissors, Sparkles, Wand2 } from 'lucide-react';
 import { hapticImpact, hapticNotify } from '../../utils/telegram';
-import { mediaUrl, withToken } from '../../utils/session';
+import { withToken } from '../../utils/session';
+import { downloadServerFile } from '../../utils/download';
+import { tg } from '../../utils/telegram';
 import { useMediaToken } from '../../utils/useMediaToken';
 import { apiFetch } from '../../utils/api';
 import { L } from './labels';
@@ -51,7 +53,7 @@ function copyFromForm(form) {
 
 function Counter({ value, limit }) {
   const over = value.length > limit;
-  return <span className={`text-[10px] font-semibold tabular-nums ${over ? 'text-rose-600' : 'text-slate-500 dark:text-slate-400'}`}>{value.length}/{limit}</span>;
+  return <span className={`text-xs font-semibold tabular-nums ${over ? 'text-rose-600' : 'text-slate-500 dark:text-slate-400'}`}>{value.length}/{limit}</span>;
 }
 
 /**
@@ -69,6 +71,7 @@ export default function CardView({ card, registry, lang, onUpdate }) {
   const [form, setForm] = useState(() => formFromCopy(card.copy, textStyles.find((s) => s.id === card.photoshoot_style)));
   const [busy, setBusy] = useState(null); // 'render' | 'fix' | 'rewrite'
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const fields = style?.fields || {};
   const limits = style?.limits || {};
@@ -105,6 +108,7 @@ export default function CardView({ card, registry, lang, onUpdate }) {
     hapticImpact('medium');
     setBusy(kind);
     setError('');
+    setNotice('');
     try {
       await fn();
       hapticNotify('success');
@@ -156,13 +160,14 @@ export default function CardView({ card, registry, lang, onUpdate }) {
 
   const download = async () => {
     hapticImpact('light');
-    const a = document.createElement('a');
-    a.href = await mediaUrl(`/api/cards/${card.id}/photo?download=1`);
-    a.download = `oqila-${card.id}.jpg`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    await downloadServerFile(`/api/cards/${card.id}/photo`, `oqila-${card.id}.jpg`);
   };
+
+  // Fallback for clients that cannot save a file themselves: the bot sends the picture to the user's chat
+  const sendToChat = () => run('send', async () => {
+    await apiFetch(`/api/cards/${card.id}/send`, { method: 'POST', fallback: l.error_regen });
+    setNotice(l.sent_to_chat);
+  });
 
   const status = !hasPicture ? null : verification?.verified === true ? (
     <p className="flex gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />{l.verified}</p>
@@ -222,6 +227,11 @@ export default function CardView({ card, registry, lang, onUpdate }) {
       </div>
 
       {status}
+      {hasPicture && tg?.initData && (
+        <button type="button" onClick={sendToChat} disabled={Boolean(busy)}
+          className="min-h-11 px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs font-bold disabled:opacity-50">{l.send_to_chat}</button>
+      )}
+      {notice && <p role="status" className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">{notice}</p>}
       {hasPicture && verification?.unexpected?.length > 0 && (
         <p className="text-[11px] text-slate-600 dark:text-slate-300">{l.unexpected_title} {verification.unexpected.map((u) => `«${u}»`).join(', ')}</p>
       )}

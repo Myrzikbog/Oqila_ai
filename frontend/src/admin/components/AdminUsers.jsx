@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import { showAlert, showConfirm } from '../../utils/telegram';
 import { fetchAdminUsers, toggleAdminUserActive, downloadUsersCsv } from '../utils/adminApi';
 
 const STATUS_CONFIG = {
@@ -49,33 +50,29 @@ export default function AdminUsers({ onSelectUser }) {
   const [page, setPage] = useState(0);
   const limit = 20;
 
-  const loadUsers = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetchAdminUsers({
-        limit,
-        offset: page * limit,
-        search,
-        status: statusFilter,
-        category: categoryFilter,
-      });
-      setUsers(res.users || []);
-      setTotal(res.total || 0);
-    } catch (err) {
-      console.error('Failed to load users:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [query, setQuery] = useState(''); // the search text that is applied (the input is `search`)
+  const [error, setError] = useState('');
 
+  // One effect loads the list for the page, the filters and the applied search: the offset is never stale
   useEffect(() => {
-    loadUsers();
-  }, [page, statusFilter, categoryFilter]);
+    let alive = true;
+    setIsLoading(true);
+    setError('');
+    fetchAdminUsers({ limit, offset: page * limit, search: query, status: statusFilter, category: categoryFilter })
+      .then((res) => {
+        if (!alive) return;
+        setUsers(res.users || []);
+        setTotal(res.total || 0);
+      })
+      .catch((err) => { if (alive && err.message !== 'UNAUTHORIZED') setError(err.message); })
+      .finally(() => { if (alive) setIsLoading(false); });
+    return () => { alive = false; };
+  }, [page, statusFilter, categoryFilter, query]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     setPage(0);
-    loadUsers();
+    setQuery(search.trim());
   };
 
   const handleToggleActive = async (user) => {
@@ -83,7 +80,7 @@ export default function AdminUsers({ onSelectUser }) {
       ? `Деактивировать аккаунт ${user.name || user.tg_first_name}?`
       : `Активировать аккаунт ${user.name || user.tg_first_name}?`;
 
-    if (!window.confirm(confirmMsg)) return;
+    if (!(await showConfirm(confirmMsg))) return;
 
     try {
       const res = await toggleAdminUserActive(user.user_id);
@@ -91,14 +88,14 @@ export default function AdminUsers({ onSelectUser }) {
         prev.map((u) => (u.user_id === user.user_id ? { ...u, is_active: res.is_active ? 1 : 0 } : u))
       );
     } catch (err) {
-      alert('Ошибка при изменении статуса: ' + err.message);
+      showAlert('Ошибка при изменении статуса: ' + err.message);
     }
   };
 
   const totalPages = Math.ceil(total / limit);
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-300">
+    <div className="space-y-4 animate-in  duration-300">
       {/* Header & Controls */}
       <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -186,6 +183,7 @@ export default function AdminUsers({ onSelectUser }) {
       {/* Users Table */}
       <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
+          {error && <p role="alert" className="p-3 text-xs font-semibold text-rose-300">{error}</p>}
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-400 text-[11px] uppercase tracking-wider font-semibold">

@@ -1,0 +1,1 @@
+import{o as e,r as t}from"./index-BcBq4N8J.js";async function n(n,r){let i=`${n}${n.includes(`?`)?`&`:`?`}download=1`;return e(await t(i),r)}export{n as t};

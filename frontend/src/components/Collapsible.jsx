@@ -30,7 +30,7 @@ export default function Collapsible({ icon: Icon, title, summary, defaultOpen = 
           )}
         </span>
         <ChevronDown
-          className={`w-4 h-4 flex-shrink-0 text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          className={`w-4 h-4 flex-shrink-0 text-slate-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
         />
       </button>
       {open && (

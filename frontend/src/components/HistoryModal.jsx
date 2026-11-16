@@ -1,5 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { mediaUrl, withToken } from '../utils/session';
+import React, { useState, useEffect, useRef } from 'react';
+import { withToken } from '../utils/session';
+import { apiFetch } from '../utils/api';
+import { downloadServerFile } from '../utils/download';
+import { useTelegramBackButton } from '../utils/useTelegram';
+import { useDialog } from '../utils/useDialog';
 import { useMediaToken } from '../utils/useMediaToken';
 
 const escapeHtml = (value) =>
@@ -21,7 +25,7 @@ import {
   Printer,
   Filter
 } from 'lucide-react';
-import { hapticImpact, hapticNotify } from '../utils/telegram';
+import { hapticImpact, hapticNotify, showConfirm } from '../utils/telegram';
 
 export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, userId }) {
   useMediaToken(); // pictures are loaded with a short-lived media token: render again when it is renewed
@@ -31,36 +35,34 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
   const [searchQuery, setSearchQuery] = useState('');
   const [onlyFavorites, setOnlyFavorites] = useState(false);
 
-  const fetchHistory = async () => {
-    setIsLoading(true);
-    try {
-      const q = searchQuery.trim() ? `&search=${encodeURIComponent(searchQuery.trim())}` : '';
-      const fav = onlyFavorites ? '&favorites_only=true' : '';
-      const res = await fetch(`/api/history?limit=100${q}${fav}`);
-      const data = await res.json();
-      // Picture URLs carry no token: components add the short-lived media token when they render them
-      setHistoryItems(data.items || []);
-    } catch (err) {
-      console.error('Failed to load history:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  useTelegramBackButton(isOpen, onClose);
+  const dialogRef = useRef(null);
+  useDialog(isOpen, onClose, dialogRef);
 
+  // One effect for everything that changes the list; a newer request cancels the older one, so a slow answer
+  // for "ab" can never overwrite the answer for "abc". The search waits 250 ms after the last keystroke.
   useEffect(() => {
-    if (isOpen) {
-      fetchHistory();
-    }
-  }, [isOpen, onlyFavorites]);
-
-  // Debounced search
-  useEffect(() => {
-    if (!isOpen) return;
-    const timer = setTimeout(() => {
-      fetchHistory();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+    if (!isOpen) return undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setIsLoading(true);
+      setError('');
+      try {
+        const q = searchQuery.trim() ? `&search=${encodeURIComponent(searchQuery.trim())}` : '';
+        const fav = onlyFavorites ? '&favorites_only=true' : '';
+        const res = await apiFetch(`/api/history?limit=100${q}${fav}`, { signal: controller.signal, fallback: t.history_load_error });
+        const data = await res.json();
+        setHistoryItems(data.items || []);
+      } catch (err) {
+        if (err.name !== 'AbortError' && !controller.signal.aborted) setError(err.message || t.history_load_error);
+      } finally {
+        if (!controller.signal.aborted) setIsLoading(false);
+      }
+    }, searchQuery ? 250 : 0);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [isOpen, onlyFavorites, searchQuery, reloadKey, t.history_load_error]);
 
   if (!isOpen) return null;
 
@@ -68,41 +70,39 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
     e.stopPropagation();
     hapticImpact('light');
     try {
-      const res = await fetch(`/api/history/${id}/favorite`, { method: 'POST' });
+      const res = await apiFetch(`/api/history/${id}/favorite`, { method: 'POST', fallback: t.history_load_error });
       const data = await res.json();
-      if (data.status === 'ok') {
-        setHistoryItems((prev) =>
-          prev.map((item) => (item.id === id ? { ...item, is_favorite: data.is_favorite } : item))
-        );
-        hapticNotify('success');
-      }
+      setHistoryItems((prev) => prev.map((item) => (item.id === id ? { ...item, is_favorite: data.is_favorite } : item)));
+      hapticNotify('success');
     } catch (err) {
-      console.error('Failed to toggle favorite:', err);
+      setError(err.message);
+      hapticNotify('error');
     }
   };
 
+  // The list changes only after the server confirmed the deletion
   const handleDeleteItem = async (e, id) => {
     e.stopPropagation();
     hapticImpact('medium');
     try {
-      await fetch(`/api/history/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/history/${id}`, { method: 'DELETE', fallback: t.history_delete_error });
       setHistoryItems((prev) => prev.filter((item) => item.id !== id));
       hapticNotify('success');
     } catch (err) {
-      console.error(err);
+      setError(err.message || t.history_delete_error);
       hapticNotify('error');
     }
   };
 
   const handleClearAll = async () => {
-    if (!window.confirm(t.history_clear_confirm)) return;
+    if (!(await showConfirm(t.history_clear_confirm))) return;
     hapticImpact('heavy');
     try {
-      await fetch('/api/history', { method: 'DELETE' });
+      await apiFetch('/api/history', { method: 'DELETE', fallback: t.history_delete_error });
       setHistoryItems([]);
       hapticNotify('success');
     } catch (err) {
-      console.error(err);
+      setError(err.message || t.history_delete_error);
       hapticNotify('error');
     }
   };
@@ -118,15 +118,10 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleDownloadPhoto = async (e, url) => {
+  const handleDownloadPhoto = async (e, item) => {
     e.stopPropagation();
     hapticImpact('light');
-    const a = document.createElement('a');
-    a.href = await mediaUrl(url);
-    a.download = `oqila-studio-${Date.now()}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    await downloadServerFile(`/api/cards/${item.id}/photo`, `oqila-${item.id}.jpg`);
   };
 
   const handlePrintCatalog = (e, item) => {
@@ -180,7 +175,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
   const formatDate = (isoString) => {
     try {
       const d = new Date(isoString);
-      return d.toLocaleDateString(lang === 'uz' ? 'uz-UZ' : 'ru-RU', {
+      return d.toLocaleDateString(t.ui_historymodal_1, {
         day: 'numeric',
         month: 'short',
         hour: '2-digit',
@@ -192,7 +187,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t.dialog_history} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-sm animate-in  duration-200">
       <div 
         className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[88vh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -205,10 +200,10 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
-                {lang === 'uz' ? "Mening tovarlarim (Katalog)" : "Мои товары (Каталог)"}
+                {t.ui_historymodal_2}
               </h3>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500">
-                {historyItems.length} {lang === 'uz' ? "ta mahsulot saqlangan" : "сохранённых товаров"}
+              <p className="text-xs text-slate-500 dark:text-slate-500">
+                {historyItems.length} {t.ui_historymodal_3}
               </p>
             </div>
           </div>
@@ -226,7 +221,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-full text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -236,7 +231,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
         {/* Search & Favorites Filter Bar (Item 22) */}
         <div className="p-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 space-y-2 flex-shrink-0">
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
             <input
               type="text"
               value={searchQuery}
@@ -248,7 +243,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600"
+                className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-600"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -264,7 +259,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
               }}
               className={`px-3 py-1 rounded-lg font-bold text-[11px] transition-all ${
                 !onlyFavorites
-                  ? 'bg-brand-600 text-white shadow-xs'
+                  ? 'bg-brand-600 text-white shadow-sm'
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
               }`}
             >
@@ -279,7 +274,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
               }}
               className={`px-3 py-1 rounded-lg font-bold text-[11px] flex items-center space-x-1 transition-all ${
                 onlyFavorites
-                  ? 'bg-amber-500 text-white shadow-xs'
+                  ? 'bg-amber-500 text-white shadow-sm'
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
               }`}
             >
@@ -291,22 +286,28 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
 
         {/* List Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {error && (
+            <div role="alert" className="flex items-center justify-between gap-3 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs font-semibold text-rose-800 dark:text-rose-200">
+              <span>{error}</span>
+              <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="min-h-11 px-3 rounded-lg bg-rose-600 text-white font-bold">{t.legal_retry}</button>
+            </div>
+          )}
           {isLoading && historyItems.length === 0 ? (
-            <div className="py-12 flex flex-col items-center justify-center space-y-2 text-slate-400">
+            <div className="py-12 flex flex-col items-center justify-center space-y-2 text-slate-500">
               <div className="w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
               <p className="text-xs">{t.loading}</p>
             </div>
           ) : historyItems.length === 0 ? (
-            <div className="py-12 flex flex-col items-center justify-center text-center space-y-2 text-slate-400">
+            <div className="py-12 flex flex-col items-center justify-center text-center space-y-2 text-slate-500">
               <PackageOpen className="w-10 h-10 stroke-[1.25] text-slate-300 dark:text-slate-600" />
               <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
                 {onlyFavorites
-                  ? (lang === 'uz' ? "Hali sevimlilarga qo'shilgan mahsulotlar yo'q" : "Нет избранных товаров")
+                  ? (t.ui_historymodal_4)
                   : (t.history_empty_title || "Список пуст")}
               </p>
               <p className="text-[11px] max-w-[220px]">
                 {onlyFavorites
-                  ? (lang === 'uz' ? "Mahsulot burchagidagi yulduzchani bosing" : "Нажмите звездочку на карточке товара")
+                  ? (t.ui_historymodal_5)
                   : (t.history_empty_desc || "Сгенерируйте карточку в Студии")}
               </p>
             </div>
@@ -326,9 +327,9 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
                 }`}
               >
                 {/* Top Row: Date, Favorite Star, Delete */}
-                <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <div className="flex items-center justify-between text-xs text-slate-500">
                   <div className="flex items-center space-x-1.5">
-                    <Calendar className="w-3 h-3 text-slate-400" />
+                    <Calendar className="w-3 h-3 text-slate-500" />
                     <span>{formatDate(item.created_at)}</span>
                   </div>
 
@@ -348,7 +349,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
                     </button>
 
                     {item.studio_photo_url && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 flex items-center space-x-0.5">
+                      <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 flex items-center space-x-0.5">
                         <Sparkles className="w-2.5 h-2.5" />
                         <span>AI</span>
                       </span>
@@ -357,7 +358,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
                     <button
                       type="button"
                       onClick={(e) => handleDeleteItem(e, item.id)}
-                      className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-all ml-1"
+                      className="p-1 rounded-md text-slate-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-all ml-1"
                       title={t.history_delete_item}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -417,7 +418,7 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
                     {item.studio_photo_url && (
                       <button
                         type="button"
-                        onClick={(e) => handleDownloadPhoto(e, item.studio_photo_url)}
+                        onClick={(e) => handleDownloadPhoto(e, item)}
                         className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-all text-xs"
                         title={t.download_photo}
                       >

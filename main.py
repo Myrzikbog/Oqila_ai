@@ -1095,6 +1095,37 @@ async def fix_card_text(card_id: int, req: FixTextRequest, user: dict = Depends(
     return _render_response(card_id, style, aspect, rendered)
 
 
+@app.get("/api/cards/{card_id}/source")
+def get_card_source(card_id: int, user: dict = Depends(current_user_for_media)):
+    """The seller's own original photo of a card (what the AI was given), for the "original" view."""
+    from fastapi.responses import FileResponse
+
+    card = get_card(card_id, user["user_id"])
+    path = resolve_photo(card.get("source_photo_url")) if card else None
+    if not path:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FileResponse(str(path), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
+
+
+@app.post("/api/cards/{card_id}/send")
+async def send_card_to_chat(card_id: int, user: dict = Depends(current_user)):
+    """Send the card's picture to the user's own Telegram chat as a file: the way to save it when the in-app
+    download is not available (old Telegram clients). Browser guests have no chat."""
+    tg_id = int(user.get("tg_id") or 0)
+    if tg_id <= 0:
+        raise HTTPException(status_code=400, detail="Open the app from Telegram to receive files in the chat")
+    card = get_card(card_id, user["user_id"])
+    path = resolve_photo(card.get("studio_photo_url")) if card else None
+    if not path:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    data = await run_blocking(path.read_bytes)
+    ext = path.suffix.lstrip(".").lower() or "jpg"
+    ok = await telegram_service.send_document(tg_id, data, filename=f"oqila-{card_id}.{ext}", mime=("image/png" if ext == "png" else "image/jpeg"))
+    if not ok:
+        raise HTTPException(status_code=502, detail="Could not send the file to Telegram")
+    return {"status": "ok"}
+
+
 @app.get("/api/cards/{card_id}/poster.png", deprecated=True)
 def old_poster_link_redirect(card_id: int, request: Request):
     """Posters are ordinary pictures now: old links are permanently redirected to the card's photo."""
@@ -1583,23 +1614,25 @@ async def get_uzum_order_label(order_id: int, size: str = "LARGE", user: dict = 
 
 
 @app.get("/api/uzum/orders/{order_id}/label.png")
-def get_uzum_order_label_png(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
+def get_uzum_order_label_png(order_id: int, size: str = "LARGE", download: bool = False, user: dict = Depends(current_user_for_media)):
     """Return shipping label as a 203 DPI monochrome PNG image (58x40 or 43x25 mm)."""
     from services.uzum_service import uzum_service
     png_bytes = uzum_service.generate_thermal_label_image(user["user_id"], order_id, size=size)
     if not png_bytes:
         raise HTTPException(status_code=404, detail="Etiketka rasmini yaratib bo'lmadi")
-    return Response(content=png_bytes, media_type="image/png")
+    headers = {"Content-Disposition": f'attachment; filename="uzum-label-{order_id}.png"'} if download else None
+    return Response(content=png_bytes, media_type="image/png", headers=headers)
 
 
 @app.get("/api/uzum/orders/{order_id}/label.svg")
-def get_uzum_order_label_svg(order_id: int, size: str = "LARGE", user: dict = Depends(current_user_for_media)):
+def get_uzum_order_label_svg(order_id: int, size: str = "LARGE", download: bool = False, user: dict = Depends(current_user_for_media)):
     """Return shipping label as a pure vector SVG (58x40 or 43x25 mm)."""
     from services.uzum_service import uzum_service
     svg_content = uzum_service.generate_thermal_label_svg(user["user_id"], order_id, size=size)
     if not svg_content:
         raise HTTPException(status_code=404, detail="Buyurtma topilmadi")
-    return Response(content=svg_content, media_type="image/svg+xml")
+    headers = {"Content-Disposition": f'attachment; filename="uzum-label-{order_id}.svg"'} if download else None
+    return Response(content=svg_content, media_type="image/svg+xml", headers=headers)
 
 
 @app.get("/api/uzum/stocks")
@@ -1806,8 +1839,21 @@ def admin_get_card_photo(card_id: int, admin_auth: bool = Security(verify_admin_
     return _card_photo_response(card_id, owner_id=None)
 
 
+def verify_admin_export(request: Request, et: Optional[str] = None) -> bool:
+    """CSV files are opened by URL (a download cannot send headers): an administrator gets a 10-minute `?et=` token
+    from POST /api/admin/export-token; the usual admin credentials work as well."""
+    if et and verify_media_token(et, aud="admin_export"):
+        return True
+    return verify_admin_key(request, request.headers.get("X-Admin-Key"))
+
+
+@app.post("/api/admin/export-token")
+def admin_export_token(admin_auth: bool = Security(verify_admin_key)):
+    return {"export_token": create_media_token(1, aud="admin_export"), "expires_in": MEDIA_TOKEN_TTL_SECONDS}
+
+
 @app.get("/api/admin/export/users.csv")
-def admin_export_users_csv(admin_auth: bool = Security(verify_admin_key)):
+def admin_export_users_csv(admin_auth: bool = Depends(verify_admin_export)):
     """Export all users data as a beautiful, Excel-compatible CSV with UTF-8 BOM."""
     from services.csv_service import generate_users_csv
 
@@ -1822,7 +1868,7 @@ def admin_export_users_csv(admin_auth: bool = Security(verify_admin_key)):
 
 
 @app.get("/api/admin/export/cards.csv")
-def admin_export_cards_csv(admin_auth: bool = Security(verify_admin_key)):
+def admin_export_cards_csv(admin_auth: bool = Depends(verify_admin_export)):
     """Export all generated cards data as a beautiful, Excel-compatible CSV."""
     from services.csv_service import generate_cards_csv
 

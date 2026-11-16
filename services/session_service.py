@@ -110,17 +110,18 @@ def verify_session_token(token: Optional[str]) -> Optional[int]:
 MEDIA_TOKEN_TTL_SECONDS = 600
 
 
-def create_media_token(user_id: int, ttl_seconds: int = MEDIA_TOKEN_TTL_SECONDS) -> str:
+def create_media_token(user_id: int, ttl_seconds: int = MEDIA_TOKEN_TTL_SECONDS, aud: str = "media") -> str:
     """Short-lived token for URLs loaded by <img>/<a> tags (`?mt=`). Unlike the 30-day session token it may
-    appear in a URL: it expires in 10 minutes and only opens the user's own media."""
-    payload = {"uid": int(user_id), "exp": int(time.time()) + int(ttl_seconds), "aud": "media"}
+    appear in a URL: it expires in 10 minutes and only opens the user's own media. `aud` separates purposes:
+    a token made for one purpose is useless for another ("media" for pictures, "admin_export" for CSV files)."""
+    payload = {"uid": int(user_id), "exp": int(time.time()) + int(ttl_seconds), "aud": aud}
     body = _b64e(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     sig = _b64e(hmac.new(get_session_secret(), b"media:" + body.encode("ascii"), hashlib.sha256).digest())
     return f"{body}.{sig}"
 
 
-def verify_media_token(token: Optional[str]) -> Optional[int]:
-    """Return the user_id of a valid, unexpired media token, else None. Session tokens are not accepted."""
+def verify_media_token(token: Optional[str], aud: str = "media") -> Optional[int]:
+    """Return the user_id of a valid, unexpired token made for `aud`, else None. Session tokens are not accepted."""
     if not token or not isinstance(token, str) or token.count(".") != 1:
         return None
     body, sig = token.split(".", 1)
@@ -129,7 +130,7 @@ def verify_media_token(token: Optional[str]) -> Optional[int]:
         if not hmac.compare_digest(expected, sig):
             return None
         payload: Dict[str, Any] = json.loads(_b64d(body))
-        if payload.get("aud") != "media" or int(payload.get("exp", 0)) < time.time():
+        if payload.get("aud") != aud or int(payload.get("exp", 0)) < time.time():
             return None
         uid = int(payload["uid"])
         return uid if uid > 0 else None

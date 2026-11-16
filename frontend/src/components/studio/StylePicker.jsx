@@ -41,7 +41,7 @@ export function OutputTypePicker({ groups, value, onChange, lang }) {
         }`}
       >
         <div className="flex items-center gap-2">
-          <Icon className={`w-4 h-4 flex-shrink-0 ${selected ? 'text-brand-600 dark:text-teal-300' : 'text-slate-400'}`} />
+          <Icon className={`w-4 h-4 flex-shrink-0 ${selected ? 'text-brand-600 dark:text-teal-300' : 'text-slate-500'}`} />
           <span className={`${big ? 'text-sm' : 'text-xs'} font-bold text-slate-900 dark:text-white`}>{group[lang] || group.ru}</span>
         </div>
         <div className="mt-1 text-[11px] leading-snug text-slate-500 dark:text-slate-400">
@@ -128,11 +128,11 @@ export function StylePicker({ styles, value, onChange, lang, showMore = true }) 
                 <StylePreview src={style.preview} />
               ) : null}
               <div className="flex items-center gap-1.5">
-                {!style.preview && <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${selected ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'}`} />}
-                <span className="truncate font-bold text-[11px]">{style[lang] || style.ru}</span>
+                {!style.preview && <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${selected ? 'text-teal-200' : 'text-slate-500 dark:text-slate-500'}`} />}
+                <span className="line-clamp-2 font-bold text-[11px] leading-tight">{style[lang] || style.ru}</span>
               </div>
               {(style[`tag_${lang}`] || style.tag_ru) && (
-                <span className={`inline-block text-[9px] font-bold mt-1 px-1.5 rounded ${
+                <span className={`inline-block text-xs font-bold mt-1 px-1.5 rounded ${
                   selected ? 'bg-brand-700/80 text-teal-100' : 'bg-slate-200/80 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
                 }`}>
                   {style[`tag_${lang}`] || style.tag_ru}

@@ -297,6 +297,7 @@ class TelegramService:
         filename: str = "report.csv",
         caption: Optional[str] = None,
         reply_markup: Optional[Dict[str, Any]] = None,
+        mime: str = "text/csv",
     ) -> bool:
         """Send a document or file directly to a Telegram chat."""
         if not self.is_configured:
@@ -308,7 +309,7 @@ class TelegramService:
         if reply_markup:
             data["reply_markup"] = json.dumps(reply_markup)
         files = {
-            "document": (filename, document_bytes, "text/csv")
+            "document": (filename, document_bytes, mime)
         }
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:

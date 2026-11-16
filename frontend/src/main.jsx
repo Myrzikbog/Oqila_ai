@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import { installAuthFetch, setReloginHandler } from './utils/session'
+import { readJson } from './utils/storage';
 import { loginWithBackend } from './utils/auth'
 
 // The admin panel is loaded only on the admin route, keeping it out of the main bundle
@@ -26,13 +27,7 @@ const isStageRoute = window.location.pathname.startsWith('/stage');
 // Start signing in before the first render: child components fetch data in their effects,
 // which run before App's own effect. The auth fetch wrapper waits for this login.
 if (!isAdminRoute && !isStageRoute) {
-  let cachedProfile = null;
-  try {
-    cachedProfile = JSON.parse(localStorage.getItem('oqila_profile') || 'null');
-  } catch {
-    cachedProfile = null;
-  }
-  loginWithBackend(cachedProfile);
+  loginWithBackend(readJson('oqila_profile', null));
 }
 
 createRoot(document.getElementById('root')).render(

@@ -59,7 +59,7 @@ export default function AdminLogin({ onLoginSuccess }) {
 
         {/* Error notification */}
         {errorMessage && (
-          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start space-x-2.5 animate-in fade-in">
+          <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start space-x-2.5 animate-in ">
             <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-rose-400" />
             <span>{errorMessage}</span>
           </div>

@@ -25,6 +25,7 @@ import {
   ArrowRightLeft,
   Star
 } from 'lucide-react';
+import { apiFetch } from '../utils/api';
 import { hapticImpact } from '../utils/telegram';
 import Collapsible, { Disclosure } from './Collapsible';
 
@@ -77,36 +78,35 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
     }
   }, [profile]);
 
-  const fetchCalculation = async (sale, cost, bType, tRegime, cat, fCosts) => {
-    try {
-      const res = await fetch('/api/calculate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sale_price: parseFloat(sale) || 0,
-          cost_price: parseFloat(cost) || 0,
-          lang,
-          business_type: bType,
-          trade_regime: tRegime,
-          category: cat,
-          fixed_costs: parseFloat(fCosts) || 0,
-        }),
-      });
-      const data = await res.json();
-      setCalcData(data);
-    } catch (err) {
-      console.error('Calculation error:', err);
-    }
-  };
+  const [calcError, setCalcError] = useState('');
 
+  // One request per pause in typing; a newer one cancels the older, so a slow answer never overwrites a fresh one
   useEffect(() => {
-    const sale = salePrice.replace(/\D/g, '');
-    const cost = costPrice.replace(/\D/g, '');
-    const fCosts = fixedCosts.replace(/\D/g, '');
-    const timer = setTimeout(() => {
-      fetchCalculation(sale, cost, businessType, tradeRegime, category, fCosts);
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch('/api/calculate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          fallback: t.ui_tabfinance_1,
+          body: JSON.stringify({
+            sale_price: parseFloat(salePrice.replace(/\D/g, '')) || 0,
+            cost_price: parseFloat(costPrice.replace(/\D/g, '')) || 0,
+            lang,
+            business_type: businessType,
+            trade_regime: tradeRegime,
+            category,
+            fixed_costs: parseFloat(fixedCosts.replace(/\D/g, '')) || 0,
+          }),
+        });
+        setCalcData(await res.json());
+        setCalcError('');
+      } catch (err) {
+        if (err.name !== 'AbortError' && !controller.signal.aborted) setCalcError(err.message);
+      }
     }, 250);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [salePrice, costPrice, businessType, tradeRegime, category, fixedCosts, lang]);
 
   const formatMoney = (val) => {
@@ -115,8 +115,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
   };
 
   const handlePriceInput = (setter) => (e) => {
-    hapticImpact('light');
-    const raw = e.target.value.replace(/\D/g, '');
+    const raw = e.target.value.replace(/\D/g, ''); // no vibration per keystroke
     setter(raw);
   };
 
@@ -166,7 +165,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
   })();
 
   const categories = [
-    { id: 'electronics', label: lang === 'uz' ? "Elektronika va aksessuarlar (Xitoy) (8%)" : "Электроника и аксессуары (Китай) (8%)" },
+    { id: 'electronics', label: t.ui_tabfinance_2 },
     { id: 'clothing', label: t.cat_clothing },
     { id: 'craft', label: t.cat_craft },
     { id: 'food', label: t.cat_food },
@@ -184,7 +183,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             <Calculator className="w-5 h-5 text-brand-600 dark:text-teal-400 flex-shrink-0" />
             <h2 className="font-bold text-sm tracking-tight">{t.finance_title}</h2>
           </div>
-          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300">
+          <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300">
             {t.uzum_tariffs_badge || 'Тарифы 2026 г.'}
           </span>
         </div>
@@ -195,7 +194,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
 
       {/* CBU Exchange Rates & Converter Bar (Item 21) */}
       {exchangeRates && (
-        <div className="glass-card rounded-2xl p-3 border border-amber-200/80 dark:border-amber-800/40 bg-gradient-to-r from-amber-50/50 via-white to-amber-50/20 dark:from-amber-950/20 dark:via-slate-900 dark:to-slate-900 shadow-xs">
+        <div className="glass-card rounded-2xl p-3 border border-amber-200/80 dark:border-amber-800/40 bg-gradient-to-r from-amber-50/50 via-white to-amber-50/20 dark:from-amber-950/20 dark:via-slate-900 dark:to-slate-900 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-1.5 text-xs font-bold text-amber-800 dark:text-amber-300">
               <Globe2 className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
@@ -210,7 +209,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               className="text-[11px] font-bold text-amber-700 dark:text-amber-400 hover:text-amber-900 flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-amber-100/70 dark:bg-amber-900/50"
             >
               <ArrowRightLeft className="w-3 h-3" />
-              <span>{showConverter ? (lang === 'uz' ? "Yopish" : "Скрыть") : (lang === 'uz' ? "Valyuta kalkulyatori" : "Конвертер")}</span>
+              <span>{showConverter ? (t.ui_tabfinance_3) : (t.ui_tabfinance_4)}</span>
             </button>
           </div>
 
@@ -220,7 +219,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               if (!item) return null;
               return (
                 <div key={curr} className="flex flex-col items-center">
-                  <span className="text-[10px] font-extrabold text-slate-500 dark:text-slate-400">{curr}</span>
+                  <span className="text-xs font-extrabold text-slate-500 dark:text-slate-400">{curr}</span>
                   <span className="font-extrabold text-slate-900 dark:text-white">
                     {Math.round(item.rate).toLocaleString('ru-RU')}
                   </span>
@@ -250,7 +249,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                 <option value="EUR">EUR (€)</option>
                 <option value="RUB">RUB (₽)</option>
               </select>
-              <span className="text-slate-400 font-bold">=</span>
+              <span className="text-slate-500 font-bold">=</span>
               <span className="font-extrabold text-brand-700 dark:text-teal-300 text-xs">
                 {Math.round((parseFloat(convertVal) || 0) * (exchangeRates[convertCurrency]?.rate || 1)).toLocaleString('ru-RU')} {t.currency}
               </span>
@@ -261,15 +260,15 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
 
       {/* User Profile Context Badge */}
       {profile && (
-        <div className="flex items-center justify-between p-2.5 px-3.5 rounded-2xl bg-brand-50/80 dark:bg-teal-950/30 border border-brand-200/80 dark:border-teal-800/60 shadow-xs text-xs">
+        <div className="flex items-center justify-between p-2.5 px-3.5 rounded-2xl bg-brand-50/80 dark:bg-teal-950/30 border border-brand-200/80 dark:border-teal-800/60 shadow-sm text-xs">
           <div className="flex items-center space-x-2 truncate">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
             <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
               {profile.name} • {profile.status === 'self_employed' 
-                ? (lang === 'uz' ? "O'z-o'zini band qilish (1% soliq)" : "Самозанятая (1% налог)") 
+                ? (t.ui_tabfinance_5) 
                 : profile.status === 'yatt'
-                ? (lang === 'uz' ? "YaTT (1% soliq)" : "ЯТТ (1% налог)")
-                : (lang === 'uz' ? "Rejalashtirish" : "Выбор статуса")}
+                ? (t.ui_tabfinance_6)
+                : (t.ui_tabfinance_7)}
             </span>
           </div>
           <button
@@ -277,7 +276,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             onClick={onOpenProfile}
             className="text-[11px] font-bold text-brand-700 dark:text-teal-300 hover:text-brand-900 dark:hover:text-teal-100 underline decoration-dotted flex-shrink-0 ml-2"
           >
-            {lang === 'uz' ? "O'zgartirish" : "Настроить"}
+            {t.ui_tabfinance_8}
           </button>
         </div>
       )}
@@ -321,9 +320,9 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               >
                 <div className="text-xs font-bold flex items-center justify-between">
                   <span>Uzum / Онлайн</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-brand-600 text-white font-black">1%</span>
+                  <span className="px-1.5 py-0.5 rounded text-xs bg-brand-600 text-white font-black">1%</span>
                 </div>
-                <div className="text-[10px] opacity-80 mt-0.5">{lang === 'uz' ? "Uzum soliq agenti" : "Агент маркетплейс"}</div>
+                <div className="text-xs opacity-80 mt-0.5">{t.ui_tabfinance_9}</div>
               </button>
 
               <button
@@ -337,9 +336,9 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               >
                 <div className="text-xs font-bold flex items-center justify-between">
                   <span>Магазин / Розница</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-brand-600 text-white font-black">1%</span>
+                  <span className="px-1.5 py-0.5 rounded text-xs bg-brand-600 text-white font-black">1%</span>
                 </div>
-                <div className="text-[10px] opacity-80 mt-0.5">Ст. 467 НК РУз (2026)</div>
+                <div className="text-xs opacity-80 mt-0.5">Ст. 467 НК РУз (2026)</div>
               </button>
             </div>
           </div>
@@ -359,7 +358,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                 onChange={handlePriceInput(setCostPrice)}
                 className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-bold text-slate-900 dark:text-white"
               />
-              <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+              <span className="absolute right-2.5 top-2 text-xs font-bold text-slate-500 dark:text-slate-500 uppercase">
                 {t.currency}
               </span>
             </div>
@@ -377,7 +376,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                 onChange={handlePriceInput(setSalePrice)}
                 className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-bold text-slate-900 dark:text-white"
               />
-              <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+              <span className="absolute right-2.5 top-2 text-xs font-bold text-slate-500 dark:text-slate-500 uppercase">
                 {t.currency}
               </span>
             </div>
@@ -407,7 +406,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             }}
             className="w-full accent-teal-600 cursor-pointer h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg"
           />
-          <div className="flex justify-between text-[9px] font-semibold text-slate-400">
+          <div className="flex justify-between text-xs font-semibold text-slate-500">
             <span>Мин: {formatMoney(Math.max(10000, Math.round((parseFloat(costPrice) || 0) * 0.5)))}</span>
             <span>Макс: {formatMoney(Math.max(1500000, (parseFloat(costPrice) || 120000) * 4))}</span>
           </div>
@@ -437,6 +436,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
       </div>
 
       {/* Result: the four numbers that matter */}
+      {calcError && <p role="alert" className="text-xs font-semibold text-rose-700 dark:text-rose-300 px-1">{calcError}</p>}
       {calcData && (
         <div className="grid grid-cols-2 gap-2.5">
           <div className="col-span-2 rounded-2xl p-4 bg-brand-700 dark:bg-teal-900/60 text-white shadow-soft">
@@ -457,7 +457,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               <TrendingUp className="w-4 h-4" />
             </div>
             <div className="text-base font-extrabold text-slate-900 dark:text-white mt-1">
-              {formatMoney(calcData.gross_profit)} <span className="text-[10px] font-semibold text-slate-500">{t.currency}</span>
+              {formatMoney(calcData.gross_profit)} <span className="text-xs font-semibold text-slate-500">{t.currency}</span>
             </div>
           </div>
 
@@ -467,7 +467,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               <Receipt className="w-4 h-4" />
             </div>
             <div className="text-base font-extrabold text-rose-600 dark:text-rose-400 mt-1">
-              {formatMoney(calcData.tax_payable_item)} <span className="text-[10px] font-semibold">{t.currency}</span>
+              {formatMoney(calcData.tax_payable_item)} <span className="text-xs font-semibold">{t.currency}</span>
             </div>
           </div>
         </div>
@@ -481,7 +481,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               <BarChart3 className="w-4 h-4 text-brand-600 dark:text-teal-400" />
               <span>{t.distribution_title}</span>
             </span>
-            <span className="text-[10px] font-bold text-slate-500">100% = {formatMoney(calcData.sale_price)} {t.currency}</span>
+            <span className="text-xs font-bold text-slate-500">100% = {formatMoney(calcData.sale_price)} {t.currency}</span>
           </div>
 
           {/* Segmented bar */}
@@ -493,7 +493,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
           </div>
 
           {/* Legend */}
-          <div className="grid grid-cols-2 gap-2 text-[10px] font-semibold text-slate-600 dark:text-slate-300 pt-1">
+          <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300 pt-1">
             <div className="flex items-start space-x-1.5">
               <span className="mt-0.5 w-2.5 h-2.5 rounded-sm bg-slate-400 dark:bg-slate-500 flex-shrink-0" />
               <span className="leading-tight">{t.calc_cost_price}: <b className="text-slate-900 dark:text-white">{calcData.cost_share_pct}%</b></span>
@@ -529,19 +529,19 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                 }`}>
                   {isBest && (
-                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full bg-emerald-600 text-[8px] font-black text-white whitespace-nowrap">
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full bg-emerald-600 text-xs font-black text-white whitespace-nowrap">
                       TOP 1
                     </span>
                   )}
                   <div>
-                    <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate">Do'kon / Direct</div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">0% komissiya</div>
+                    <div className="text-xs font-bold text-slate-500 dark:text-slate-400 truncate">Do'kon / Direct</div>
+                    <div className="text-xs text-slate-500 mt-0.5">0% komissiya</div>
                   </div>
                   <div className="mt-2">
                     <span className="font-black text-xs text-emerald-700 dark:text-emerald-300 block">
                       {formatMoney(directNet)}
                     </span>
-                    <span className="text-[8px] text-slate-400">{t.currency}</span>
+                    <span className="text-xs text-slate-500">{t.currency}</span>
                   </div>
                 </div>
               );
@@ -558,14 +558,14 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                 }`}>
                   <div>
-                    <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate">Telegram / Insta</div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">1.5% ekvayring</div>
+                    <div className="text-xs font-bold text-slate-500 dark:text-slate-400 truncate">Telegram / Insta</div>
+                    <div className="text-xs text-slate-500 mt-0.5">1.5% ekvayring</div>
                   </div>
                   <div className="mt-2">
                     <span className="font-black text-xs text-sky-700 dark:text-sky-300 block">
                       {formatMoney(calcData.telegram_net)}
                     </span>
-                    <span className="text-[8px] text-slate-400">{t.currency}</span>
+                    <span className="text-xs text-slate-500">{t.currency}</span>
                   </div>
                 </div>
               );
@@ -581,14 +581,14 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                 }`}>
                   <div>
-                    <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 truncate">Uzum Market</div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">Komissiya + logistika</div>
+                    <div className="text-xs font-bold text-slate-500 dark:text-slate-400 truncate">Uzum Market</div>
+                    <div className="text-xs text-slate-500 mt-0.5">Komissiya + logistika</div>
                   </div>
                   <div className="mt-2">
                     <span className="font-black text-xs text-purple-700 dark:text-purple-300 block">
                       {formatMoney(calcData.uzum_net)}
                     </span>
-                    <span className="text-[8px] text-slate-400">{t.currency}</span>
+                    <span className="text-xs text-slate-500">{t.currency}</span>
                   </div>
                 </div>
               );
@@ -607,7 +607,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               </div>
               <div>
                 <h3 className="font-bold text-xs text-slate-900 dark:text-white">{t.tax_summary_title}</h3>
-                <span className="text-[10px] text-slate-500 dark:text-slate-400">{calcData.tax_name}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">{calcData.tax_name}</span>
               </div>
             </div>
             <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300">
@@ -638,7 +638,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
             </div>
             <span className="font-black text-slate-900 dark:text-white text-right whitespace-nowrap">
               {formatMoney(calcData.social_tax_monthly)} {t.currency}
-              <span className="block text-[10px] font-normal text-slate-500">{t.per_month}</span>
+              <span className="block text-xs font-normal text-slate-500">{t.per_month}</span>
             </span>
           </div>
 
@@ -726,10 +726,10 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                   </div>
                   <div>
                     <h3 className="font-bold text-xs text-slate-900 dark:text-white">{t.uzum_calc_title}</h3>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400">{calcData.uzum_category_name}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{calcData.uzum_category_name}</span>
                   </div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
                   {Math.round(calcData.uzum_commission_rate * 100)}% + {formatMoney(calcData.uzum_logistics_fee)} {t.currency}
                 </span>
               </div>
@@ -766,10 +766,10 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                   </div>
                   <div>
                     <h3 className="font-bold text-xs text-slate-900 dark:text-white">{t.telegram_calc_title}</h3>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400">Click / Payme / Instagram Direct</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Click / Payme / Instagram Direct</span>
                   </div>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
                   1.5% эквайринг
                 </span>
               </div>
@@ -805,7 +805,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                 </div>
                 <div>
                   <h3 className="font-bold text-xs text-slate-900 dark:text-white">{t.breakeven_title}</h3>
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400">{t.breakeven_hint}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{t.breakeven_hint}</span>
                 </div>
               </div>
 
@@ -822,7 +822,7 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
                     placeholder={t.fixed_costs_placeholder}
                     className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-bold text-slate-900 dark:text-white"
                   />
-                  <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                  <span className="absolute right-2.5 top-2 text-xs font-bold text-slate-500 dark:text-slate-500 uppercase">
                     {t.currency}
                   </span>
                 </div>
@@ -831,13 +831,13 @@ export default function TabFinance({ lang, t, profile, onOpenProfile }) {
               {calcData.fixed_costs > 0 && (
                 <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800 text-xs">
                   <div className="p-2 rounded-xl bg-purple-50/50 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40">
-                    <span className="text-slate-500 dark:text-slate-400 block text-[10px]">{t.breakeven_uzum_label}</span>
+                    <span className="text-slate-500 dark:text-slate-400 block text-xs">{t.breakeven_uzum_label}</span>
                     <span className="text-base font-extrabold text-purple-700 dark:text-purple-300">
                       {calcData.break_even_units_uzum ? `${calcData.break_even_units_uzum} ${t.units_per_month}` : '—'}
                     </span>
                   </div>
                   <div className="p-2 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/40">
-                    <span className="text-slate-500 dark:text-slate-400 block text-[10px]">
+                    <span className="text-slate-500 dark:text-slate-400 block text-xs">
                       {calcData.self_employed_allowed ? t.breakeven_self_label : 'Нужно продать (ЯТТ):'}
                     </span>
                     <span className="text-base font-extrabold text-teal-700 dark:text-teal-300">

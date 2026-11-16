@@ -1,10 +1,12 @@
 import React from 'react';
+import { showAlert } from '../../utils/telegram';
 import { 
   Shield, 
   LayoutDashboard, 
   Users, 
   Sparkles, 
   Activity, 
+  Scale,
   LogOut, 
   Download, 
   ExternalLink 
@@ -19,7 +21,7 @@ export default function AdminNavbar({ activeTab, onSelectTab, onLogout }) {
     try {
       await downloadUsersCsv();
     } catch (e) {
-      alert('Ошибка при экспорте CSV: ' + e.message);
+      showAlert('Ошибка при экспорте CSV: ' + e.message);
     } finally {
       setIsExporting(false);
     }
@@ -30,6 +32,7 @@ export default function AdminNavbar({ activeTab, onSelectTab, onLogout }) {
     { id: 'users', label: 'Предприниматели', icon: Users },
     { id: 'cards', label: 'Карточки AI', icon: Sparkles },
     { id: 'events', label: 'Журнал событий', icon: Activity },
+    { id: 'legal', label: 'Юрист', icon: Scale },
   ];
 
   return (
@@ -63,7 +66,7 @@ export default function AdminNavbar({ activeTab, onSelectTab, onLogout }) {
                   onClick={() => onSelectTab(item.id)}
                   className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
                     isActive
-                      ? 'bg-brand-600/30 text-teal-300 border border-teal-500/40 shadow-xs'
+                      ? 'bg-brand-600/30 text-teal-300 border border-teal-500/40 shadow-sm'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
                   }`}
                 >

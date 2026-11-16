@@ -4,14 +4,21 @@ import AdminDashboard from './components/AdminDashboard';
 import AdminUsers from './components/AdminUsers';
 import AdminCards from './components/AdminCards';
 import AdminEvents from './components/AdminEvents';
+import AdminLegal from './components/AdminLegal';
 import AdminLogin from './components/AdminLogin';
 import AdminUserDetailModal from './components/AdminUserDetailModal';
-import { clearAdminKey, hasAdminCredentials, testAdminKey } from './utils/adminApi';
+import { clearAdminKey, hasAdminCredentials, setUnauthorizedHandler, testAdminKey } from './utils/adminApi';
 
 export default function AdminApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => hasAdminCredentials());
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'users' | 'cards' | 'events'
   const [selectedUserId, setSelectedUserId] = useState(null);
+
+  // A refused request (expired key, revoked rights) returns to the sign-in screen instead of an empty page
+  useEffect(() => {
+    setUnauthorizedHandler(() => setIsAuthenticated(false));
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   useEffect(() => {
     if (hasAdminCredentials()) {
@@ -65,6 +72,8 @@ export default function AdminApp() {
         {activeTab === 'cards' && (
           <AdminCards onSelectUser={(id) => setSelectedUserId(id)} />
         )}
+
+        {activeTab === 'legal' && <AdminLegal />}
 
         {activeTab === 'events' && (
           <AdminEvents onSelectUser={(id) => setSelectedUserId(id)} />

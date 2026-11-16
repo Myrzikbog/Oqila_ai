@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { showAlert } from '../../utils/telegram';
 import { 
   Users, 
   UserCheck, 
@@ -104,7 +105,7 @@ export default function AdminDashboard({ onSelectTab }) {
   );
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="space-y-6 animate-in  duration-300">
       {/* Top Banner & Quick Refresh */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
         <div>
@@ -126,7 +127,7 @@ export default function AdminDashboard({ onSelectTab }) {
               try {
                 await downloadUsersCsv();
               } catch (e) {
-                alert('Ошибка при скачивании CSV пользователей: ' + e.message);
+                showAlert('Ошибка при скачивании CSV пользователей: ' + e.message);
               }
             }}
             className="px-3 py-1.5 rounded-xl bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/30 text-xs font-medium flex items-center space-x-1.5 transition-colors"
@@ -141,7 +142,7 @@ export default function AdminDashboard({ onSelectTab }) {
               try {
                 await downloadCardsCsv();
               } catch (e) {
-                alert('Ошибка при скачивании CSV карточек: ' + e.message);
+                showAlert('Ошибка при скачивании CSV карточек: ' + e.message);
               }
             }}
             className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-medium flex items-center space-x-1.5 transition-colors"

@@ -42,7 +42,7 @@ export default function AdminEvents({ onSelectUser }) {
   }, [eventTypeFilter]);
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-300">
+    <div className="space-y-4 animate-in  duration-300">
       {/* Header & Controls */}
       <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -173,7 +173,7 @@ export default function AdminEvents({ onSelectUser }) {
 
       {/* JSON Details Modal */}
       {selectedDetails && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in ">
           <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-sm font-bold text-white flex items-center space-x-2">

@@ -4,6 +4,7 @@
  */
 export function fireConfetti() {
   try {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
     const canvas = document.createElement('canvas');
     canvas.style.position = 'fixed';
     canvas.style.top = '0';
@@ -11,7 +12,7 @@ export function fireConfetti() {
     canvas.style.width = '100vw';
     canvas.style.height = '100vh';
     canvas.style.pointerEvents = 'none';
-    canvas.style.zIndex = '99999';
+    canvas.style.zIndex = '30'; // under the sticky header (40), the navigation and the modals (50)
     document.body.appendChild(canvas);
 
     const ctx = canvas.getContext('2d');

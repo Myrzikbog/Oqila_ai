@@ -655,6 +655,7 @@ def get_history(
                     "user_id": row["user_id"],
                     **card_text(row["info_config"]),
                     "has_source": bool(row["source_photo_url"]),
+                    "source_photo_url": f"/api/cards/{row['id']}/source" if row["source_photo_url"] else None,
                 })
             return items
     except Exception as exc:

@@ -20,7 +20,7 @@ export default function BottomNav({ activeTab, setActiveTab, t }) {
   };
 
   return (
-    <nav className="fixed bottom-3 inset-x-0 z-50 px-4 pointer-events-none">
+    <nav aria-label="Main" className="fixed bottom-3 inset-x-0 z-50 px-4 pointer-events-none" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       <div className="max-w-md mx-auto pointer-events-auto">
         <div className="glass-panel bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/90 dark:border-slate-800/90 rounded-2xl shadow-float p-1.5 flex items-center justify-around transition-colors duration-200">
           {tabs.map((tab) => {
@@ -29,16 +29,18 @@ export default function BottomNav({ activeTab, setActiveTab, t }) {
             return (
               <button
                 key={tab.id}
+                type="button"
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => handleTabClick(tab.id)}
-                className={`flex-1 py-2 px-1 flex flex-col items-center justify-center rounded-xl transition-all duration-200 ${
+                className={`flex-1 min-h-11 py-2 px-1 flex flex-col items-center justify-center rounded-xl transition-all duration-200 ${
                   isActive
                     ? 'bg-brand-50 dark:bg-brand-950/80 text-brand-700 dark:text-teal-300 font-bold shadow-sm'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-medium'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-slate-200 font-medium'
                 }`}
               >
                 <Icon
                   className={`w-5 h-5 transition-transform duration-200 ${
-                    isActive ? 'scale-110 text-brand-600 dark:text-teal-400' : 'text-slate-400 dark:text-slate-500'
+                    isActive ? 'scale-110 text-brand-600 dark:text-teal-400' : 'text-slate-500 dark:text-slate-500'
                   }`}
                   strokeWidth={isActive ? 2.3 : 1.75}
                 />

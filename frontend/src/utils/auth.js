@@ -84,3 +84,18 @@ export async function saveProfileToBackend(userId, profile) {
     return null;
   }
 }
+
+/** Keep the chosen interface language on the server (a partial update: only `lang` changes). */
+export async function saveLangToBackend(lang) {
+  if (!getSessionToken()) return false;
+  try {
+    const res = await fetch('/api/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lang }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

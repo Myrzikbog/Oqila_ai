@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { showAlert } from '../../utils/telegram';
 import { 
   X, 
   User, 
@@ -47,7 +48,7 @@ export default function AdminUserDetailModal({ userId, onClose }) {
         user: { ...prev.user, is_active: res.is_active ? 1 : 0 },
       }));
     } catch (err) {
-      alert('Ошибка при изменении статуса: ' + err.message);
+      showAlert('Ошибка при изменении статуса: ' + err.message);
     }
   };
 
@@ -56,7 +57,7 @@ export default function AdminUserDetailModal({ userId, onClose }) {
   const events = data?.events || [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in ">
       <div 
         className="w-full max-w-3xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}

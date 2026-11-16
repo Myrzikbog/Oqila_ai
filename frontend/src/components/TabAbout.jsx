@@ -53,18 +53,18 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
           className="w-full py-2.5 px-4 rounded-xl bg-brand-50 hover:bg-brand-100/80 dark:bg-teal-950/60 dark:hover:bg-teal-900/60 border border-brand-200 dark:border-teal-800 text-brand-800 dark:text-teal-200 font-bold text-xs flex items-center justify-center space-x-2 transition-all active:scale-[0.98]"
         >
           <Sparkles className="w-4 h-4 text-brand-600 dark:text-teal-400" />
-          <span>{lang === 'uz' ? "Ilova bo'yicha interaktiv tur (Qo'llanma)" : "Интерактивный тур по платформе"}</span>
+          <span>{t.ui_tababout_1}</span>
         </button>
 
         <div className="flex flex-wrap gap-1.5 pt-1">
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800">
-            {lang === 'uz' ? "Barcha funksiyalar bepul" : "Бесплатный доступ"}
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800">
+            {t.ui_tababout_2}
           </span>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-            {lang === 'uz' ? "Telegram Mini App" : "Работает в Telegram"}
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+            {t.ui_tababout_3}
           </span>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-            {lang === 'uz' ? "O'zbekiston qonunchiligi" : "Законы Узбекистана"}
+          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+            {t.ui_tababout_4}
           </span>
         </div>
       </div>
@@ -140,12 +140,12 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
         </p>
 
         <div className="flex items-center flex-wrap gap-1.5 pt-1">
-          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-teal-300 border border-brand-200 dark:border-brand-800">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-semibold bg-brand-50 dark:bg-brand-950/60 text-brand-700 dark:text-teal-300 border border-brand-200 dark:border-brand-800">
             <GraduationCap className="w-3.5 h-3.5 mr-1 text-brand-600 dark:text-teal-400" />
-            {lang === 'uz' ? "TDYU • Toshkent Davlat Yuridik Universiteti" : "ТГЮУ • Ташкентский Государственный Юридический Университет"}
+            {t.ui_tababout_5}
           </span>
-          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-            {lang === 'uz' ? "Biznes huquqi va sud faoliyati (2-kurs)" : "Бизнес-право и судебная защита (2 курс)"}
+          <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+            {t.ui_tababout_6}
           </span>
         </div>
       </div>
@@ -164,9 +164,9 @@ export default function TabAbout({ lang, t, onOpenOnboardingTour }) {
       {/* Clean Footer */}
       <div className="text-center py-2 space-y-1">
         <p className="text-[11px] font-extrabold text-slate-500 dark:text-slate-400">
-          {t.about_title} • {lang === 'uz' ? "Tadbirkor Ayollar Uchun" : "Для Предпринимательниц"}
+          {t.about_title} • {t.ui_tababout_7}
         </p>
-        <p className="text-[10px] text-slate-400 dark:text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-500">
           {t.about_copyright}
         </p>
       </div>

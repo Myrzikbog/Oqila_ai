@@ -29,11 +29,15 @@ import {
 } from 'lucide-react';
 import { hapticImpact, hapticNotify, openTelegramShare } from '../utils/telegram';
 import { fireConfetti } from '../utils/confetti';
-import { mediaUrl, withToken } from '../utils/session';
+import { withToken } from '../utils/session';
+import { downloadServerFile } from '../utils/download';
 import { useMediaToken } from '../utils/useMediaToken';
 import { OutputTypePicker, StylePicker } from './studio/StylePicker';
 import CardView from './studio/CardView';
+import Collapsible from './Collapsible';
 import { apiFetch } from '../utils/api';
+import { prepareImage } from '../utils/imageFile';
+import { useClosingConfirmation } from '../utils/useTelegram';
 import { L as STUDIO_L } from './studio/labels';
 
 // Used until /api/photoshoot-presets answers (and if it never does): the original photo styles only.
@@ -54,6 +58,7 @@ const FALLBACK_REGISTRY = {
   aspects: [],
 };
 let registryCache = null;
+const ASPECT_CLASS = { '1:1': 'aspect-square', '3:4': 'aspect-[3/4]', '4:5': 'aspect-[4/5]', '9:16': 'aspect-[9/16]' };
 
 export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, userId }) {
   useMediaToken();
@@ -108,11 +113,14 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   const [loadingStep, setLoadingStep] = useState('');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [result, setResult] = useState(null);
+  const [resultOriginal, setResultOriginal] = useState(null); // the seller's photo of THIS result (not whatever is in the form now)
   const [isFormCollapsed, setIsFormCollapsed] = useState(false);
   const [activePhotoView, setActivePhotoView] = useState('studio'); // 'studio' | 'original'
   const [copied, setCopied] = useState(false);
   const [copiedTag, setCopiedTag] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
+  // Telegram asks before the app is closed while a generation runs or a filled-in form has no result yet
+  useClosingConfirmation(isLoading || (!result && Boolean(imageFile || note.trim() || infoText.trim())));
 
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -141,6 +149,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     if (externalCardToLoad) {
       const card = externalCardToLoad; // a card from the history already carries copy / verification / aspect
       setResult(card);
+      setResultOriginal(card.source_photo_url || null);
       setIsFormCollapsed(true);
       if (externalCardToLoad.studio_photo_url) {
         setActivePhotoView('studio');
@@ -167,20 +176,26 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     { id: 'uzum', label: t.format_uzum || 'Uzum Market', icon: ShoppingBag },
   ];
 
-  // File upload handling
-  const handleFileChange = (file) => {
-    if (!file || !file.type.startsWith('image/')) return;
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMessage(t.file_too_large || 'Размер файла превышает 10 МБ');
-      hapticNotify('error');
-      return;
-    }
+  // File upload handling: the photo is scaled to 2048 px and sent as JPEG; unusable files get a clear message
+  const handleFileChange = async (file) => {
+    if (!file) return;
     setErrorMessage('');
-    hapticImpact('light');
-    setImageFile(file);
-    const reader = new FileReader();
-    reader.onload = (e) => setImagePreview(e.target.result);
-    reader.readAsDataURL(file);
+    try {
+      const prepared = await prepareImage(file);
+      if (prepared.size > 10 * 1024 * 1024) throw new Error('too_large');
+      hapticImpact('light');
+      setImageFile(prepared);
+      const reader = new FileReader();
+      reader.onload = (e) => setImagePreview(e.target.result);
+      reader.readAsDataURL(prepared);
+    } catch (err) {
+      setErrorMessage(err.message === 'heic' ? sl.err_heic : err.message === 'too_large' ? (t.file_too_large || sl.err_too_large) : sl.err_not_image);
+      hapticNotify('error');
+    } finally {
+      // the same file can be chosen again right away
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+    }
   };
 
   const clearImage = (e) => {
@@ -190,6 +205,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     setImagePreview(null);
     setErrorMessage('');
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
   // Reset entire form for next product
@@ -218,7 +234,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     setIsLoading(true);
     setResult(null);
     setErrorMessage('');
-    setLoadingStep(lang === 'uz' ? "Mahsulot modeli yuklanmoqda..." : "Загрузка образца изделия...");
+    setLoadingStep(t.ui_tabstudio_1);
 
     try {
       const res = await fetch(`/api/demo-card?lang=${lang}`);
@@ -228,6 +244,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
       }
       const data = await res.json();
       setResult(data);
+      setResultOriginal(null); // the demo card has no seller photo
       setIsFormCollapsed(true);
       setLoadingProgress(100);
       if (data.studio_photo_url) {
@@ -258,22 +275,16 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     } else if (generatePhoto) {
       if (imageFile) {
         setLoadingStep(
-          lang === 'uz'
-            ? "Oqila AI: tahlil va studiya fotosessiyasi yaratilmoqda..."
-            : "Oqila AI: анализ изделия и студийная фотосессия..."
+          t.ui_tabstudio_2
         );
       } else {
         setLoadingStep(
-          lang === 'uz'
-            ? "Oqila AI: tavsif bo'yicha fotosessiya va matn tayyorlanmoqda..."
-            : "Oqila AI: генерация товара и студийного фото по описанию..."
+          t.ui_tabstudio_3
         );
       }
     } else {
       setLoadingStep(
-        lang === 'uz'
-          ? "Oqila AI matnni tayyorlamoqda..."
-          : "Oqila AI создаёт карточку..."
+        t.ui_tabstudio_4
       );
     }
 
@@ -305,6 +316,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
       });
       const data = await res.json();
       setResult(data);
+      setResultOriginal(imagePreview);
       setErrorMessage('');
       setLoadingProgress(100);
       setIsFormCollapsed(true);
@@ -348,12 +360,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   const downloadStudioPhoto = async () => {
     if (!result?.studio_photo_url) return;
     hapticImpact('light');
-    const link = document.createElement('a');
-    link.href = await mediaUrl(result.studio_photo_url);
-    link.download = `oqila_studio_${Date.now()}.jpg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (result.id) await downloadServerFile(`/api/cards/${result.id}/photo`, `oqila-${result.id}.jpg`);
   };
 
   return (
@@ -371,7 +378,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               hapticImpact('light');
               onOpenHistory?.();
             }}
-            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 shadow-xs text-xs font-bold transition-all active:scale-95"
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700/80 shadow-sm text-xs font-bold transition-all active:scale-95"
             title={t.history_title}
           >
             <History className="w-3.5 h-3.5 text-brand-600 dark:text-teal-400" />
@@ -395,7 +402,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
 
       {/* Error Alert Banner */}
       {errorMessage && (
-        <div className="glass-card rounded-2xl p-3.5 border-l-4 border-l-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs">
+        <div className="glass-card rounded-2xl p-3.5 border-l-4 border-l-rose-500 bg-rose-50/80 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-sm">
           <div className="flex items-center space-x-2.5">
             <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0" />
             <span className="font-medium">{errorMessage}</span>
@@ -422,7 +429,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
                 {result.title || t.result_title}
               </p>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">
+              <p className="text-[11px] text-slate-500 dark:text-slate-500">
                 {t.form_collapsed_hint}
               </p>
             </div>
@@ -468,7 +475,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                   hapticImpact('light');
                   setIsFormCollapsed(true);
                 }}
-                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center space-x-0.5"
+                className="text-xs text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 flex items-center space-x-0.5"
               >
                 <span>{t.collapse_form || 'Свернуть'}</span>
                 <ChevronUp className="w-3.5 h-3.5" />
@@ -522,7 +529,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                 </div>
                 <div className="text-xs">
                   <span className="font-semibold text-slate-800 dark:text-slate-200">{t.upload_drop}</span>
-                  <span className="block text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">{t.upload_hint}</span>
+                  <span className="block text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">{t.upload_hint}</span>
                 </div>
               </div>
             )}
@@ -539,7 +546,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               className="w-full py-2 px-3 rounded-xl border border-dashed border-teal-300 dark:border-teal-800 bg-teal-50/60 dark:bg-teal-950/40 text-teal-800 dark:text-teal-300 hover:bg-teal-100/70 font-bold text-xs flex items-center justify-center space-x-2 transition-all active:scale-[0.98]"
             >
               <Camera className="w-4 h-4 text-brand-600 dark:text-teal-400" />
-              <span>{lang === 'uz' ? "Kameradan rasmga olish" : "Снять на камеру прямо сейчас"}</span>
+              <span>{t.ui_tabstudio_5}</span>
             </button>
             <input
               ref={cameraInputRef}
@@ -573,7 +580,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                 placeholder={sl.facts_placeholder}
                 className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white resize-none"
               />
-              <span className="block text-[10px] leading-snug text-slate-500 dark:text-slate-400">{sl.facts_hint}</span>
+              <span className="block text-xs leading-snug text-slate-500 dark:text-slate-400">{sl.facts_hint}</span>
             </label>
           )}
 
@@ -586,7 +593,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                 <p className="text-xs font-bold text-slate-900 dark:text-slate-100">
                   {outputGroup === 'photo' ? t.ai_photoshoot_toggle : sl.ai_bg_label}
                 </p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {outputGroup === 'photo' ? t.ai_photoshoot_hint : (generatePhoto ? sl.ai_bg_hint_on : sl.ai_bg_hint_off)}
                 </p>
               </div>
@@ -645,7 +652,9 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
             </div>
           )}
 
-          {/* Content Tone & Platform Format Selectors */}
+          {/* Tone and platform: rarely changed, so they sit under "More options" */}
+          <Collapsible icon={SlidersHorizontal} title={sl.more_options}>
+            <div className="p-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Tone Selector */}
             <div className="space-y-1.5">
@@ -708,11 +717,14 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
             </div>
           </div>
 
+            </div>
+          </Collapsible>
+
           {/* Pricing Inputs Grid */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center space-x-1 mb-1">
-                <Banknote className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                <Banknote className="w-3.5 h-3.5 text-slate-500 dark:text-slate-500" />
                 <span>{t.cost_price}</span>
               </label>
               <div className="relative">
@@ -722,9 +734,9 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                   value={costPrice}
                   onChange={(e) => setCostPrice(e.target.value)}
                   placeholder={t.cost_price_placeholder}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white"
+                  className="w-full pr-12 pl-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white"
                 />
-                <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                <span className="absolute right-2.5 top-2 text-xs font-bold text-slate-500 dark:text-slate-500 uppercase">
                   {t.currency}
                 </span>
               </div>
@@ -732,7 +744,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
 
             <div>
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center space-x-1 mb-1">
-                <Tag className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                <Tag className="w-3.5 h-3.5 text-slate-500 dark:text-slate-500" />
                 <span>{t.desired_price}</span>
               </label>
               <div className="relative">
@@ -742,9 +754,9 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                   value={desiredPrice}
                   onChange={(e) => setDesiredPrice(e.target.value)}
                   placeholder={t.desired_price_placeholder}
-                  className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white"
+                  className="w-full pr-12 pl-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white"
                 />
-                <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">
+                <span className="absolute right-2.5 top-2 text-xs font-bold text-slate-500 dark:text-slate-500 uppercase">
                   {t.currency}
                 </span>
               </div>
@@ -763,12 +775,12 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center space-x-1">
-                <FileText className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                <FileText className="w-3.5 h-3.5 text-slate-500 dark:text-slate-500" />
                 <span>{t.product_desc_label || t.product_note}</span>
               </label>
               {!imagePreview && (
-                <span className="text-[10px] font-semibold text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-full border border-teal-200/50 dark:border-teal-800/50">
-                  {lang === 'uz' ? "Tavsif bo'yicha yaratish" : "Генерация по описанию"}
+                <span className="text-xs font-semibold text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-full border border-teal-200/50 dark:border-teal-800/50">
+                  {t.ui_tabstudio_6}
                 </span>
               )}
             </div>
@@ -814,7 +826,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                 <Sparkles className="w-4 h-4 text-teal-200" />
                 <span>
                   {!imageFile && note.trim()
-                    ? (lang === 'uz' ? "Tavsif bo'yicha yaratish" : "Сгенерировать по описанию")
+                    ? (t.ui_tabstudio_7)
                     : t.btn_generate}
                 </span>
               </button>
@@ -844,25 +856,25 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
             </div>
 
             {/* 3 Step Indicators */}
-            <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px]">
+            <div className="grid grid-cols-3 gap-1.5 pt-1 text-xs">
               <div className={`p-1.5 rounded-lg border text-center transition-all ${
                 loadingProgress >= 20 
                   ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/60 font-bold text-brand-900 dark:text-teal-200' 
-                  : 'border-slate-200 dark:border-slate-800 text-slate-400'
+                  : 'border-slate-200 dark:border-slate-800 text-slate-500'
               }`}>
                 1. 🔍 Tahlil
               </div>
               <div className={`p-1.5 rounded-lg border text-center transition-all ${
                 loadingProgress >= 55 
                   ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/60 font-bold text-brand-900 dark:text-teal-200' 
-                  : 'border-slate-200 dark:border-slate-800 text-slate-400'
+                  : 'border-slate-200 dark:border-slate-800 text-slate-500'
               }`}>
                 2. ✍️ Matn
               </div>
               <div className={`p-1.5 rounded-lg border text-center transition-all ${
                 loadingProgress >= 80 
                   ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/60 font-bold text-brand-900 dark:text-teal-200' 
-                  : 'border-slate-200 dark:border-slate-800 text-slate-400'
+                  : 'border-slate-200 dark:border-slate-800 text-slate-500'
               }`}>
                 3. 📸 Fotosessiya
               </div>
@@ -877,7 +889,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
       {result && !isLoading && (
         <div 
           ref={resultRef}
-          className="w-full glass-card rounded-2xl p-4 sm:p-5 border border-brand-200/80 dark:border-slate-800 shadow-soft space-y-4"
+          className="w-full scroll-mt-20 glass-card rounded-2xl p-4 sm:p-5 border border-brand-200/80 dark:border-slate-800 shadow-soft space-y-4"
         >
           {/* Header Row */}
           <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
@@ -886,7 +898,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               <span>{t.result_title}</span>
             </span>
             <div className="flex items-center space-x-2">
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-50 dark:bg-brand-950/80 text-brand-700 dark:text-teal-300 border border-brand-200 dark:border-brand-800">
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-brand-50 dark:bg-brand-950/80 text-brand-700 dark:text-teal-300 border border-brand-200 dark:border-brand-800">
                 {t.ready_to_post || 'Ready to Post'}
               </span>
             </div>
@@ -907,10 +919,10 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               lang={lang}
               onUpdate={(patch) => setResult((r) => ({ ...r, ...patch }))}
             />
-          ) : (result.studio_photo_url || imagePreview) && (
+          ) : (result.studio_photo_url || resultOriginal) && (
             <div className="space-y-2">
               {/* Photo View Switcher if both are available */}
-              {result.studio_photo_url && imagePreview && (
+              {result.studio_photo_url && resultOriginal && (
                 <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
                   <button
                     type="button"
@@ -939,33 +951,33 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
-                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                    <Eye className="w-3.5 h-3.5 text-slate-500" />
                     <span>{t.view_original_photo}</span>
                   </button>
                 </div>
               )}
 
               {/* Main Photo Display with Aspect 1:1 for Studio */}
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-slate-100 dark:bg-slate-900 shadow-sm group">
+              <div className={`relative overflow-hidden rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white shadow-sm group ${ASPECT_CLASS[result.aspect] || 'aspect-square'}`}>
                 <img
                   src={
                     activePhotoView === 'studio' && result.studio_photo_url
                       ? withToken(result.studio_photo_url)
-                      : (imagePreview || withToken(result.studio_photo_url))
+                      : (withToken(resultOriginal) || withToken(result.studio_photo_url))
                   }
                   alt={result.title}
-                  className="w-full aspect-square object-cover"
+                  className="w-full h-full object-contain bg-white"
                 />
 
                 {/* Badge Overlay */}
                 <div className="absolute top-2.5 left-2.5">
                   {activePhotoView === 'studio' && result.studio_photo_url ? (
-                    <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-900/80 backdrop-blur-md text-teal-300 border border-teal-500/30 shadow-md">
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-900/80 backdrop-blur-md text-teal-300 border border-teal-500/30 shadow-md">
                       <Sparkles className="w-3 h-3 text-teal-400" />
-                      <span>{imagePreview ? (t.studio_photo_badge || 'AI Студийное фото') : (lang === 'uz' ? "AI fotosurat (tavsif bo'yicha)" : "AI фото по описанию")}</span>
+                      <span>{resultOriginal ? (t.studio_photo_badge || 'AI Студийное фото') : (t.ui_tabstudio_8)}</span>
                     </span>
                   ) : (
-                    <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-900/80 backdrop-blur-md text-white/90 shadow-md">
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-900/80 backdrop-blur-md text-white/90 shadow-md">
                       <span>{t.original_photo_badge || 'Оригинал'}</span>
                     </span>
                   )}
@@ -976,7 +988,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
                   <button
                     type="button"
                     onClick={downloadStudioPhoto}
-                    className="absolute top-2.5 right-2.5 p-2 rounded-xl bg-slate-900/80 hover:bg-slate-900 backdrop-blur-md text-white shadow-md transition-all active:scale-95"
+                    className="absolute top-2.5 right-2.5 min-w-11 min-h-11 flex items-center justify-center p-2 rounded-xl bg-slate-900/80 hover:bg-slate-900 backdrop-blur-md text-white shadow-md transition-all active:scale-95"
                     title={t.download_photo}
                   >
                     <Download className="w-4 h-4" />

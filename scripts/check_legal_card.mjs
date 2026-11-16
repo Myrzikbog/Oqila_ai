@@ -29,9 +29,9 @@ const message = {
     follow_up_questions: ['Когда платить?'], confidence: 'low', escalate: true, escalate_reason: 'суд',
   },
 };
-const html = renderToStaticMarkup(React.createElement(Card, { message, lang: 'ru', t, isLast: true, onFollowUp() {}, onRate() {} }));
+const html = renderToStaticMarkup(React.createElement(Card, { message, t, isLast: true, onFollowUp() {}, onRate() {} }));
 const must = ['[legal_mock_notice]', '[legal_escalate]: суд', '[legal_check_calc]', '[legal_conflict]', '<b>1%</b>', '&lt;img src=x onerror=alert(1)&gt;', 'href="https://soliq.uz"', '[legal_costs]', '[legal_sources]', '[legal_deadlines]', 'Когда платить?'];
-const rated = renderToStaticMarkup(React.createElement(Card, { message: { ...message, fallback: false }, lang: 'ru', t, isLast: false, onFollowUp() {}, onRate() {} }));
+const rated = renderToStaticMarkup(React.createElement(Card, { message: { ...message, fallback: false }, t, isLast: false, onFollowUp() {}, onRate() {} }));
 if (!rated.includes('aria-pressed="true"') || rated.includes('Когда платить?')) { console.error('FAIL rating buttons or follow-ups', rated.slice(0, 400)); process.exit(1); }
 const missing = must.filter((m) => !html.includes(m));
 if (missing.length || html.includes('<img') || html.includes('<script')) { console.error('FAIL', missing, '\n', html.slice(0, 1200)); process.exit(1); }

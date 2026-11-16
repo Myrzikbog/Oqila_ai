@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   User, 
   Building2, 
@@ -17,7 +17,10 @@ import {
   Package,
   Briefcase
 } from 'lucide-react';
-import { getTelegramUser, hapticImpact, hapticNotify } from '../utils/telegram';
+import { getTelegramUser, hapticImpact, hapticNotify, showConfirm } from '../utils/telegram';
+import { useTelegramBackButton } from '../utils/useTelegram';
+import { useDialog } from '../utils/useDialog';
+import { clearStorage } from '../utils/storage';
 import { saveProfileToBackend } from '../utils/auth';
 import Collapsible from './Collapsible';
 import BrandSettings from './studio/BrandSettings';
@@ -50,12 +53,15 @@ export default function ProfileModal({
     }
   }, [profile, isOpen]);
 
+  useTelegramBackButton(isOpen, onClose);
+  const dialogRef = useRef(null);
+  useDialog(isOpen, onClose, dialogRef);
   if (!isOpen) return null;
 
   const handleSave = async () => {
     hapticNotify('success');
     const updatedProfile = {
-      name: name.trim() || (lang === 'uz' ? 'Tadbirkor' : 'Предпринимательница'),
+      name: name.trim() || (t.ui_profilemodal_1),
       status,
       category,
       salesChannel,
@@ -73,7 +79,7 @@ export default function ProfileModal({
   const handleSkip = () => {
     hapticImpact('light');
     const defaultProfile = {
-      name: name.trim() || (lang === 'uz' ? 'Tadbirkor' : 'Предпринимательница'),
+      name: name.trim() || (t.ui_profilemodal_2),
       status: 'self_employed',
       category: 'sewing',
       salesChannel: 'uzum',
@@ -171,9 +177,9 @@ export default function ProfileModal({
   const channelList = lang === 'uz' ? CHANNEL_OPTIONS_UZ : CHANNEL_OPTIONS_RU;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 dark:bg-black/75 backdrop-blur-xs animate-in fade-in duration-200">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t.dialog_profile} tabIndex={-1} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 dark:bg-black/75 backdrop-blur-sm animate-in duration-200">
       <div 
-        className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-200/90 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col transition-all duration-200 animate-in slide-in-from-bottom duration-300"
+        className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl border border-slate-200/90 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col transition-all duration-200 animate-in duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -185,22 +191,18 @@ export default function ProfileModal({
             <div>
               <h3 className="font-bold text-sm tracking-tight leading-snug">
                 {isOnboarding 
-                  ? (lang === 'uz' ? 'Oqila AI ga xush kelibsiz! 👋' : 'Добро пожаловать в Oqila AI! 👋')
-                  : (lang === 'uz' ? 'Tadbirkor profili' : 'Профиль предпринимательницы')}
+                  ? (t.ui_profilemodal_3)
+                  : (t.ui_profilemodal_4)}
               </h3>
               <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
                 {isOnboarding
-                  ? (lang === 'uz' 
-                      ? 'Profilingizni sozlang — soliqlar va AI javoblari sizga moslashtiriladi'
-                      : 'Настройте профиль за 1 мин для автоматического расчёта налогов и точных ответов ИИ')
-                  : (lang === 'uz'
-                      ? 'Moliya va huquqiy yordamchi uchun biznes parametrlari'
-                      : 'Параметры бизнеса для финансовых расчётов и консультаций ИИ')}
+                  ? (t.ui_profilemodal_5)
+                  : (t.ui_profilemodal_6)}
               </p>
               {userId && (
                 <div className="inline-flex items-center space-x-1 mt-1 px-2 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/30 text-[9.5px] text-teal-200 font-medium">
                   <Check className="w-2.5 h-2.5 text-teal-300" />
-                  <span>{lang === 'uz' ? 'Server bilan sinxronlangan' : 'Синхронизировано с сервером'}</span>
+                  <span>{t.ui_profilemodal_7}</span>
                 </div>
               )}
             </div>
@@ -213,7 +215,7 @@ export default function ProfileModal({
                 hapticImpact('light');
                 onClose();
               }}
-              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors ml-2"
+              className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-white/10 transition-colors ml-2"
             >
               <X className="w-5 h-5" />
             </button>
@@ -226,13 +228,13 @@ export default function ProfileModal({
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
               <User className="w-3.5 h-3.5 text-brand-600 dark:text-teal-400" />
-              <span>{lang === 'uz' ? 'Ismingiz yoki brend nomi' : 'Ваше имя или название бренда'}</span>
+              <span>{t.ui_profilemodal_8}</span>
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={lang === 'uz' ? 'Masalan: Malika yoki «Zardo\'z Atelier»' : 'Например: Азиза или «Silk & Craft»'}
+              placeholder={t.ui_profilemodal_9}
               className="w-full text-xs px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 text-slate-900 dark:text-white placeholder-slate-400 font-medium"
             />
           </div>
@@ -240,9 +242,9 @@ export default function ProfileModal({
           {/* Section 1: Legal Status */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
-              <span>{lang === 'uz' ? '1. Soliq va huquqiy maqom' : '1. Налоговый и правовой статус'}</span>
-              <span className="text-[10px] font-normal text-slate-400">
-                {lang === 'uz' ? 'Soliq stavkasi shunga bog\'liq' : 'Влияет на ставку налога'}
+              <span>{t.ui_profilemodal_10}</span>
+              <span className="text-xs font-normal text-slate-500">
+                {t.ui_profilemodal_11}
               </span>
             </label>
 
@@ -297,7 +299,7 @@ export default function ProfileModal({
           {/* Section 2: Business Niche / Category */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              {lang === 'uz' ? '2. Faoliyat yo\'nalishi (Nisha)' : '2. Сфера деятельности (Ниша)'}
+              {t.ui_profilemodal_12}
             </label>
 
             <div className="grid grid-cols-1 gap-1.5">
@@ -313,7 +315,7 @@ export default function ProfileModal({
                     }}
                     className={`text-left px-3 py-2.5 rounded-xl border text-xs font-medium transition-all flex items-center space-x-2.5 ${
                       isSelected
-                        ? 'bg-brand-50/80 dark:bg-teal-950/40 border-brand-500 dark:border-teal-400 text-brand-900 dark:text-teal-200 font-bold ring-1 ring-brand-500/20 shadow-xs'
+                        ? 'bg-brand-50/80 dark:bg-teal-950/40 border-brand-500 dark:border-teal-400 text-brand-900 dark:text-teal-200 font-bold ring-1 ring-brand-500/20 shadow-sm'
                         : 'bg-white dark:bg-slate-800/60 border-slate-200/80 dark:border-slate-700/80 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
                   >
@@ -329,7 +331,7 @@ export default function ProfileModal({
           {/* Section 3: Sales Channel */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              {lang === 'uz' ? '3. Asosiy savdo maydoni' : '3. Основная площадка продаж'}
+              {t.ui_profilemodal_13}
             </label>
 
             <div className="grid grid-cols-2 gap-2">
@@ -358,8 +360,8 @@ export default function ProfileModal({
           </div>
           {/* Brand: shop name, contacts, colour and logo for every picture with text */}
           {!isOnboarding && (
-            <Collapsible icon={Store} title={lang === 'uz' ? 'Brend' : 'Бренд'}
-              summary={lang === 'uz' ? "Nom, kontakt, rang va logotip" : 'Название, контакты, цвет и логотип'}>
+            <Collapsible icon={Store} title={t.ui_profilemodal_14}
+              summary={t.ui_profilemodal_15}>
               <div className="px-4 pb-4"><BrandSettings lang={lang} /></div>
             </Collapsible>
           )}
@@ -375,23 +377,23 @@ export default function ProfileModal({
             <Sparkles className="w-4 h-4 text-teal-200" />
             <span>
               {isOnboarding
-                ? (lang === 'uz' ? 'Saqlash va boshlash ✨' : 'Сохранить и начать работу ✨')
-                : (lang === 'uz' ? 'O\'zgarishlarni saqlash' : 'Сохранить настройки')}
+                ? (t.ui_profilemodal_16)
+                : (t.ui_profilemodal_17)}
             </span>
           </button>
 
           {!isOnboarding && (
             <button
               type="button"
-              onClick={() => {
-                if (window.confirm(lang === 'uz' ? "Barcha ma'lumotlarni tozalab, boshidan boshlaysizmi?" : "Очистить персонализацию и тур, чтобы начать с нуля?")) {
-                  localStorage.clear();
+              onClick={async () => {
+                if (await showConfirm(t.ui_profilemodal_18)) {
+                  clearStorage();
                   window.location.reload();
                 }
               }}
-              className="w-full py-1 text-center text-[10px] font-semibold text-rose-500 hover:text-rose-700 transition-colors"
+              className="w-full py-1 text-center text-xs font-semibold text-rose-500 hover:text-rose-700 transition-colors"
             >
-              {lang === 'uz' ? "🔄 Holatni tozalash (Demo boshidan boshlash)" : "🔄 Сбросить состояние (начать с чистого листа)"}
+              {t.ui_profilemodal_19}
             </button>
           )}
 
@@ -399,9 +401,9 @@ export default function ProfileModal({
             <button
               type="button"
               onClick={handleSkip}
-              className="w-full py-1 text-center text-[11px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              className="w-full py-1 text-center text-[11px] font-medium text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
             >
-              {lang === 'uz' ? 'Standart sozlamalar bilan davom etish' : 'Пропустить и продолжить со стандартными настройками'}
+              {t.ui_profilemodal_20}
             </button>
           )}
         </div>
