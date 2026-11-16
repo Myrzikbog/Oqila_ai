@@ -38,14 +38,8 @@ export default function HistoryModal({ isOpen, onClose, onSelectCard, t, lang, u
       const fav = onlyFavorites ? '&favorites_only=true' : '';
       const res = await fetch(`/api/history?limit=100${q}${fav}`);
       const data = await res.json();
-      // Photo URLs are loaded by <img>, which cannot send the Authorization header
-      setHistoryItems(
-        (data.items || []).map((item) => ({
-          ...item,
-          // a poster is drawn on demand from its saved settings; show it instead of the raw AI scene
-          studio_photo_url: item.info_config && item.studio_photo_url ? item.studio_photo_url : (item.poster_url || item.studio_photo_url),
-        })),
-      );
+      // Picture URLs carry no token: components add the short-lived media token when they render them
+      setHistoryItems(data.items || []);
     } catch (err) {
       console.error('Failed to load history:', err);
     } finally {

@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { getTelegramUser, hapticImpact, hapticNotify } from '../utils/telegram';
 import { saveProfileToBackend } from '../utils/auth';
+import Collapsible from './Collapsible';
+import BrandSettings from './studio/BrandSettings';
 
 export default function ProfileModal({
   isOpen,
@@ -354,6 +356,13 @@ export default function ProfileModal({
               })}
             </div>
           </div>
+          {/* Brand: shop name, contacts, colour and logo for every picture with text */}
+          {!isOnboarding && (
+            <Collapsible icon={Store} title={lang === 'uz' ? 'Brend' : 'Бренд'}
+              summary={lang === 'uz' ? "Nom, kontakt, rang va logotip" : 'Название, контакты, цвет и логотип'}>
+              <div className="px-4 pb-4"><BrandSettings lang={lang} /></div>
+            </Collapsible>
+          )}
         </div>
 
         {/* Action Footer */}

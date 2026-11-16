@@ -15,32 +15,6 @@ const ICONS = {
 };
 const iconFor = (name) => ICONS[name] || Sparkles;
 
-/**
- * Tiny wireframe of a poster layout: grey = product, teal = text plates, yellow = price/badge.
- * Shows what the result will look like before anything is generated.
- */
-export function LayoutGlyph({ layout, className = '' }) {
-  const product = <rect x="9" y="12" width="12" height="14" rx="2" className="fill-slate-300 dark:fill-slate-600" />;
-  const plate = 'fill-brand-600 dark:fill-teal-500';
-  const accent = 'fill-amber-300';
-  const shapes = {
-    showcase: (<><rect x="3" y="3" width="24" height="7" rx="2" className={plate} />{product}<rect x="3" y="31" width="13" height="4" rx="2" className={accent} /></>),
-    magazine: (<><rect x="2" y="2" width="12" height="36" rx="2" className={plate} /><rect x="17" y="12" width="11" height="14" rx="2" className="fill-slate-300 dark:fill-slate-600" /><rect x="4" y="30" width="8" height="4" rx="2" className={accent} /></>),
-    minimal: (<><rect x="9" y="4" width="12" height="16" rx="2" className="fill-slate-300 dark:fill-slate-600" /><rect x="3" y="26" width="24" height="9" rx="2" className={plate} /></>),
-    sale: (<><rect x="3" y="3" width="16" height="7" rx="2" className={plate} /><circle cx="23" cy="8" r="5" className={accent} />{product}<rect x="3" y="31" width="13" height="4" rx="2" className={accent} /></>),
-    new_arrival: (<><rect x="3" y="3" width="11" height="5" rx="2.5" className={accent} /><rect x="9" y="10" width="12" height="14" rx="2" className="fill-slate-300 dark:fill-slate-600" /><rect x="3" y="28" width="24" height="8" rx="2" className={plate} /></>),
-    limited: (<><rect x="7" y="3" width="16" height="5" rx="2.5" className={plate} /><rect x="9" y="11" width="12" height="14" rx="2" className="fill-slate-300 dark:fill-slate-600" /><rect x="3" y="28" width="24" height="8" rx="2" className={plate} /></>),
-    callouts: (<><rect x="3" y="3" width="24" height="6" rx="2" className={plate} /><rect x="10" y="13" width="10" height="14" rx="2" className="fill-slate-300 dark:fill-slate-600" /><rect x="2" y="12" width="8" height="4" rx="2" className={plate} /><rect x="20" y="19" width="8" height="4" rx="2" className={plate} /><rect x="2" y="25" width="8" height="4" rx="2" className={plate} /><rect x="9" y="32" width="12" height="4" rx="2" className={accent} /></>),
-    story: (<><rect x="3" y="3" width="24" height="7" rx="2" className={plate} /><rect x="8" y="13" width="14" height="16" rx="2" className="fill-slate-300 dark:fill-slate-600" /><rect x="3" y="32" width="24" height="5" rx="2.5" className={accent} /></>),
-  };
-  return (
-    <svg viewBox="0 0 30 40" className={className} aria-hidden="true" role="img">
-      <rect x="0.5" y="0.5" width="29" height="39" rx="3" className="fill-white dark:fill-slate-900 stroke-slate-200 dark:stroke-slate-700" />
-      {shapes[layout] || null}
-    </svg>
-  );
-}
-
 /** Output types: Uzum photo and information card are the main ones, the rest sits under "more formats". */
 export function OutputTypePicker({ groups, value, onChange, lang }) {
   const l = L[lang] || L.ru;
@@ -120,7 +94,7 @@ function StylePreview({ src }) {
   );
 }
 
-/** Styles of the selected output type; posters show a wireframe of their layout. */
+/** Styles of the selected output type. */
 export function StylePicker({ styles, value, onChange, lang, showMore = true }) {
   const l = L[lang] || L.ru;
   const [expanded, setExpanded] = useState(false);
@@ -129,7 +103,7 @@ export function StylePicker({ styles, value, onChange, lang, showMore = true }) 
   const visible = hasMore && !expanded
     ? [...featured, ...styles.filter((s) => !s.featured && s.id === value)]
     : styles;
-  const withGlyph = styles.some((s) => s.layout || s.preview);
+  const withGlyph = styles.some((s) => s.preview);
 
   return (
     <div className="space-y-2">
@@ -152,11 +126,9 @@ export function StylePicker({ styles, value, onChange, lang, showMore = true }) 
             >
               {style.preview ? (
                 <StylePreview src={style.preview} />
-              ) : style.layout ? (
-                <LayoutGlyph layout={style.layout} className="w-full h-16 mb-1.5" />
               ) : null}
               <div className="flex items-center gap-1.5">
-                {!style.layout && !style.preview && <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${selected ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'}`} />}
+                {!style.preview && <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${selected ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'}`} />}
                 <span className="truncate font-bold text-[11px]">{style[lang] || style.ru}</span>
               </div>
               {(style[`tag_${lang}`] || style.tag_ru) && (

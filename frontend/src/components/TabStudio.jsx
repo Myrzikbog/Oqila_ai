@@ -32,8 +32,8 @@ import { fireConfetti } from '../utils/confetti';
 import { mediaUrl, withToken } from '../utils/session';
 import { useMediaToken } from '../utils/useMediaToken';
 import { OutputTypePicker, StylePicker } from './studio/StylePicker';
-import PosterEditor from './studio/PosterEditor';
-import InfoCardView from './studio/InfoCardView';
+import CardView from './studio/CardView';
+import { apiFetch } from '../utils/api';
 import { L as STUDIO_L } from './studio/labels';
 
 // Used until /api/photoshoot-presets answers (and if it never does): the original photo styles only.
@@ -43,15 +43,15 @@ const FALLBACK_REGISTRY = {
     { id: 'photo', icon: 'camera', ru: 'Фото товара', uz: 'Mahsulot surati', hint_ru: 'Красивая сцена вокруг вашего товара', hint_uz: 'Mahsulot atrofida chiroyli sahna', tier: 'extra' },
   ],
   styles: [
-    { id: 'uzum_clean', group: 'uzum', icon: 'shopping', layout: null, featured: true, kind: 'clean', ru: 'Белый фон', uz: 'Oq fon', tag_ru: 'Uzum', tag_uz: 'Uzum' },
-    { id: 'minimal_studio', group: 'photo', icon: 'camera', layout: null, featured: true, ru: 'Студийный свет', uz: 'Studiya nuri', tag_ru: 'Каталог', tag_uz: 'Katalog' },
-    { id: 'uzbek_heritage', group: 'photo', icon: 'sparkles', layout: null, featured: true, ru: 'Восточный колорит', uz: 'Sharq ruhi', tag_ru: 'Икат/Атлас', tag_uz: 'Ikat/Atlas' },
-    { id: 'uzum_catalog', group: 'photo', icon: 'shopping', layout: null, featured: true, ru: 'Uzum (белый фон)', uz: 'Uzum (oq fon)', tag_ru: 'Маркетплейс', tag_uz: 'Marketpleys' },
-    { id: 'luxury_dark', group: 'photo', icon: 'crown', layout: null, featured: true, ru: 'Luxury тёмный', uz: 'Hashamatli qora', tag_ru: 'Премиум', tag_uz: 'Premium' },
-    { id: 'natural_light', group: 'photo', icon: 'sun', layout: null, featured: true, ru: 'Природный свет', uz: "Tabiiy yorug'lik", tag_ru: 'Эко/Лайф', tag_uz: 'Eko/Layf' },
-    { id: 'custom', group: 'photo', icon: 'sliders', layout: null, ru: 'Своё описание', uz: "O'z tavsifim", tag_ru: 'Свободный', tag_uz: 'Erkin' },
+    { id: 'uzum_clean', group: 'uzum', icon: 'shopping', featured: true, kind: 'clean', ru: 'Белый фон', uz: 'Oq fon', tag_ru: 'Uzum', tag_uz: 'Uzum' },
+    { id: 'minimal_studio', group: 'photo', icon: 'camera', featured: true, ru: 'Студийный свет', uz: 'Studiya nuri', tag_ru: 'Каталог', tag_uz: 'Katalog' },
+    { id: 'uzbek_heritage', group: 'photo', icon: 'sparkles', featured: true, ru: 'Восточный колорит', uz: 'Sharq ruhi', tag_ru: 'Икат/Атлас', tag_uz: 'Ikat/Atlas' },
+    { id: 'uzum_catalog', group: 'photo', icon: 'shopping', featured: true, ru: 'Uzum (белый фон)', uz: 'Uzum (oq fon)', tag_ru: 'Маркетплейс', tag_uz: 'Marketpleys' },
+    { id: 'luxury_dark', group: 'photo', icon: 'crown', featured: true, ru: 'Luxury тёмный', uz: 'Hashamatli qora', tag_ru: 'Премиум', tag_uz: 'Premium' },
+    { id: 'natural_light', group: 'photo', icon: 'sun', featured: true, ru: 'Природный свет', uz: "Tabiiy yorug'lik", tag_ru: 'Эко/Лайф', tag_uz: 'Eko/Layf' },
+    { id: 'custom', group: 'photo', icon: 'sliders', ru: 'Своё описание', uz: "O'z tavsifim", tag_ru: 'Свободный', tag_uz: 'Erkin' },
   ],
-  layouts: {}, aspects: [], palettes: {},
+  aspects: [],
 };
 let registryCache = null;
 
@@ -62,6 +62,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   const [imagePreview, setImagePreview] = useState(null);
   const [costPrice, setCostPrice] = useState('');
   const [desiredPrice, setDesiredPrice] = useState('');
+  const [oldPrice, setOldPrice] = useState('');
   const [note, setNote] = useState('');
   
   // What to make: output type (photo / poster / promo / marketplace / story), its style and optional wishes
@@ -93,6 +94,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   const groupStyles = registry.styles.filter((st) => st.group === outputGroup);
   const currentStyle = registry.styles.find((st) => st.id === photoshootStyle);
   const isMain = outputGroup === 'uzum' || outputGroup === 'info';
+  const isText = currentStyle?.kind === 'ai_text'; // the AI draws the picture together with its text
 
   const handleGroupSelect = (groupId) => {
     setOutputGroup(groupId);
@@ -137,13 +139,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
 
   useEffect(() => {
     if (externalCardToLoad) {
-      const ec = externalCardToLoad;
-      let card = ec;
-      if (ec.info_config && ec.studio_photo_url) {
-        card = { ...ec, info: ec.info_config, poster: ec.poster_config || null, display: 'photo' };
-      } else if (ec.has_poster && ec.poster_config) {
-        card = { ...ec, poster: ec.poster_config, poster_has_scene: ec.poster_has_scene, display: 'poster' };
-      }
+      const card = externalCardToLoad; // a card from the history already carries copy / verification / aspect
       setResult(card);
       setIsFormCollapsed(true);
       if (externalCardToLoad.studio_photo_url) {
@@ -206,6 +202,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     setNote('');
     setOutputGroup('uzum');
     setPhotoshootStyle('uzum_clean');
+    setOldPrice('');
     setInfoText('');
     setExtraWishes('');
     setResult(null);
@@ -251,12 +248,14 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
   };
 
   // Full AI Generation with Photoshoot
-  const handleGenerate = async () => {
+  const handleGenerate = async (textOnly = false) => {
     hapticImpact('heavy');
     setIsLoading(true);
     setResult(null);
-    
-    if (generatePhoto) {
+
+    if (isText) {
+      setLoadingStep(textOnly ? sl.step_text : sl.step_picture);
+    } else if (generatePhoto) {
       if (imageFile) {
         setLoadingStep(
           lang === 'uz'
@@ -288,20 +287,22 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
     if (extraWishes.trim()) formData.append('photoshoot_prompt', extraWishes.trim());
     formData.append('content_tone', contentTone);
     formData.append('content_format', contentFormat);
-    formData.append('generate_photo', (generatePhoto || isMain) ? 'true' : 'false');
-    if (outputGroup === 'info' && infoText.trim()) formData.append('info_text', infoText.trim());
+    formData.append('generate_photo', (generatePhoto || isMain || isText) ? 'true' : 'false');
+    if (isText) {
+      formData.append('text_only', textOnly ? 'true' : 'false');
+      if (oldPrice) formData.append('old_price', oldPrice.replace(/\D/g, ''));
+      if (infoText.trim()) formData.append('info_text', infoText.trim());
+    }
     if (userId) formData.append('user_id', userId);
 
     try {
       setErrorMessage('');
-      const res = await fetch('/api/generate-card', {
+      const res = await apiFetch('/api/generate-card', {
         method: 'POST',
         body: formData,
+        timeout: 150000,
+        fallback: t.error_network || 'Ошибка сервера при генерации',
       });
-      if (!res.ok) {
-        const errPayload = await res.json().catch(() => ({}));
-        throw new Error(errPayload.detail || t.error_network || 'Ошибка сервера при генерации');
-      }
       const data = await res.json();
       setResult(data);
       setErrorMessage('');
@@ -556,12 +557,12 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
           )}
 
           {/* Uzum / info: always AI, short notes instead of the toggle */}
-          {isMain && (
+          {(isMain || isText) && (
             <p className="text-[11px] leading-snug text-slate-600 dark:text-slate-300 p-3 rounded-xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/50">
-              {outputGroup === 'uzum' ? sl.uzum_note : sl.info_wait}
+              {isText ? sl.text_note : sl.uzum_note}
             </p>
           )}
-          {outputGroup === 'info' && (
+          {isText && (
             <label className="block space-y-1">
               <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">{sl.facts_label}</span>
               <textarea
@@ -577,7 +578,7 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
           )}
 
           {/* AI Photoshoot Toggle (when image is uploaded) */}
-          {!isMain && (
+          {!isMain && !isText && (
           <div className="p-3 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/50 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
               <Camera className="w-4 h-4 text-brand-600 dark:text-teal-400 flex-shrink-0" />
@@ -750,6 +751,14 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
             </div>
           </div>
 
+          {isText && currentStyle?.fields?.old_price && (
+            <label className="block space-y-1">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{sl.old_price}</span>
+              <input type="tel" inputMode="numeric" value={oldPrice} onChange={(e) => setOldPrice(e.target.value)}
+                className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 font-medium text-slate-900 dark:text-white" />
+            </label>
+          )}
+
           {/* Product Note / Description Textarea */}
           <div className="space-y-1">
             <div className="flex items-center justify-between">
@@ -774,20 +783,42 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
 
           {/* Action Buttons */}
           <div className="grid grid-cols-1 gap-2 pt-1">
-            <button
-              type="button"
-              disabled={isLoading || (!imageFile && !note.trim())}
-              onClick={handleGenerate}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-700 via-brand-600 to-teal-600 hover:from-brand-800 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-brand-700/20 flex items-center justify-center space-x-2 transition-all active:scale-[0.98] disabled:opacity-50"
-            >
-              <Sparkles className="w-4 h-4 text-teal-200" />
-              <span>
-                {!imageFile && note.trim()
-                  ? (lang === 'uz' ? "Tavsif bo'yicha yaratish" : "Сгенерировать по описанию")
-                  : t.btn_generate}
-              </span>
-            </button>
-
+            {isText ? (
+              <>
+                {!imageFile && <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">{sl.photo_required}</p>}
+                <button
+                  type="button"
+                  disabled={isLoading || !imageFile}
+                  onClick={() => handleGenerate(true)}
+                  className="w-full min-h-11 py-3 px-4 rounded-xl bg-gradient-to-r from-brand-700 via-brand-600 to-teal-600 hover:from-brand-800 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-brand-500/20 disabled:opacity-50 flex items-center justify-center space-x-2 active:scale-[0.98]"
+                >
+                  <Sparkles className="w-4 h-4 text-teal-200" />
+                  <span>{sl.btn_write_text}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isLoading || !imageFile}
+                  onClick={() => handleGenerate(false)}
+                  className="w-full min-h-11 py-2.5 px-4 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-bold text-xs disabled:opacity-50 active:scale-[0.98]"
+                >
+                  {sl.btn_quick_picture}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={isLoading || (!imageFile && !note.trim())}
+                onClick={() => handleGenerate(false)}
+                className="w-full min-h-11 py-3 px-4 rounded-xl bg-gradient-to-r from-brand-700 via-brand-600 to-teal-600 hover:from-brand-800 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-brand-500/20 disabled:opacity-50 flex items-center justify-center space-x-2 active:scale-[0.98]"
+              >
+                <Sparkles className="w-4 h-4 text-teal-200" />
+                <span>
+                  {!imageFile && note.trim()
+                    ? (lang === 'uz' ? "Tavsif bo'yicha yaratish" : "Сгенерировать по описанию")
+                    : t.btn_generate}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -868,16 +899,14 @@ export default function TabStudio({ lang, t, onOpenHistory, externalCardToLoad, 
               <span>{result.ai_fallback_scope === 'text' ? sl.ai_fallback_text : `${result.ai_fallback === 'error' ? sl.ai_fallback_error : sl.ai_fallback_quota} ${sl.ai_fallback_not_saved}`}</span>
             </p>
           )}
-          {result.info && result.studio_photo_url && result.display !== 'poster' ? (
-            <InfoCardView
-              key={`${result.id}-${result.studio_photo_url.length}`}
+          {result.copy && result.id ? (
+            <CardView
+              key={result.id}
               card={result}
               registry={registry}
               lang={lang}
               onUpdate={(patch) => setResult((r) => ({ ...r, ...patch }))}
             />
-          ) : result.poster && registry.layouts[result.poster.layout] ? (
-            <PosterEditor key={result.id} card={result} registry={registry} lang={lang} />
           ) : (result.studio_photo_url || imagePreview) && (
             <div className="space-y-2">
               {/* Photo View Switcher if both are available */}
