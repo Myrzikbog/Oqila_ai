@@ -3,7 +3,6 @@ import base64
 import io
 import sqlite3
 
-import pytest
 from PIL import Image
 
 from conftest import auth, login, media_qs
@@ -177,6 +176,6 @@ def test_seed_demo_fills_the_account(client):
     assert client.get("/api/uzum/orders", headers=token).json()["orders"]
 
 
-def test_stage_page_is_served(client):
+def test_stage_page_is_served(client, stub_frontend):
     res = client.get("/stage")
     assert res.status_code == 200 and "<html" in res.text.lower()

@@ -481,7 +481,7 @@ def get_stats() -> Dict[str, Any]:
             daily = [
                 dict(row)
                 for row in cursor.execute(
-                    f"""
+                    """
                     WITH RECURSIVE days(day) AS (
                         SELECT date('now', '-13 days')
                         UNION ALL SELECT date(day, '+1 day') FROM days WHERE day < date('now')

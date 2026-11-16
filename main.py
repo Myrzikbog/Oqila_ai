@@ -60,7 +60,6 @@ from services.database import (
     get_card,
     get_stats,
     get_user,
-    get_user_by_tg_id,
     get_users_count,
     init_db,
     log_event,

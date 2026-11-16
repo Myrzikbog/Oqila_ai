@@ -181,3 +181,13 @@ def fake_legal(monkeypatch):
     monkeypatch.setattr(ai_module.ai_service, "_generate", model)
     monkeypatch.delenv("LEGAL_SEARCH", raising=False)
     return model
+
+
+@pytest.fixture()
+def stub_frontend(tmp_path, monkeypatch):
+    """A minimal built frontend: the real one (frontend/dist) is generated at deploy time and is not in git."""
+    import main
+
+    (tmp_path / "index.html").write_text("<!doctype html><html><body><div id=root></div></body></html>", encoding="utf-8")
+    monkeypatch.setattr(main, "FRONTEND_DIST", tmp_path)
+    return tmp_path

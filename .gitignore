@@ -8,7 +8,6 @@ __pycache__/
 *.egg
 *.egg-info/
 dist/
-!frontend/dist/
 build/
 eggs/
 parts/
@@ -78,3 +77,9 @@ frontend/dist-ssr/
 # ===== Uploaded / generated media =====
 media/
 .uzum_key
+
+# ===== Generated at deploy time =====
+frontend/dist/
+backups/
+.uzum_key
+.uzum_poller.lock

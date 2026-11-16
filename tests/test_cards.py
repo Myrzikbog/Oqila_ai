@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import auth, login, media_qs
 from services import ai_service as ai_module
 from services.imaging import MAX_BYTES, corner_whiteness, finalize_card, to_data_url
 from services.info_photo import (
@@ -34,7 +33,7 @@ from services.info_photo import (
     too_long_fields,
     verify_text,
 )
-from services.presets import ASPECTS, STYLES, allowed_aspects, default_aspect, model_aspect, pick_aspect, style_kind
+from services.presets import ASPECTS, allowed_aspects, default_aspect, model_aspect, pick_aspect, style_kind
 
 SNAPSHOTS = Path(__file__).parent / "snapshots" / "render_prompts.json"
 TEXT_STYLES = sorted(FORMATS)
@@ -451,7 +450,7 @@ def test_two_edits_when_the_first_one_helps(monkeypatch):
     service, log = scripted(monkeypatch, [BAD2, BAD1, GOOD])
     res = _render(service)
     assert res["verification"]["verified"] is True and res["image_calls"] == 3
-    assert [l["prompt"].startswith("Edit this image") for l in log] == [False, True, True]
+    assert [entry["prompt"].startswith("Edit this image") for entry in log] == [False, True, True]
 
 
 def test_render_is_regenerated_with_a_lighter_copy_when_the_edit_does_not_help(monkeypatch):

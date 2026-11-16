@@ -16,8 +16,8 @@ cd oqila-ai
 # 2. Установить зависимости Python
 pip install -r requirements.txt
 
-# 3. (Опционально) Пересобрать React-фронтенд (dist уже собран):
-# cd frontend && npm install && npm run build && cd ..
+# 3. Собрать React-фронтенд (frontend/dist не хранится в git, его собирает и deploy.sh):
+cd frontend && npm ci && npm run build && cd ..
 
 # 4. Запустить сервер
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -42,10 +42,32 @@ chmod +x deploy.sh
 ```
 
 ### Что делает `deploy.sh`:
-1. Устанавливает `python3`, `venv`, `nginx`, `git`, `curl`.
-2. Создаёт виртуальное окружение и ставит зависимости из `requirements.txt`.
-3. Создаёт и запускает фоновый сервис **systemd** (`oqila-ai.service`), который автоматически перезапускается при падении и при перезагрузке сервера.
-4. Проверяет health check.
+1. Устанавливает `python3`, `venv`, `nginx`, `git`, `curl`, `ufw`, `cron`.
+2. Создаёт виртуальное окружение и ставит точные версии зависимостей из `requirements.txt`; собирает фронтенд (`npm ci && npm run build`: `frontend/dist` в git не хранится, нужен Node 20.19+ или 22.12+).
+3. Генерирует секреты в `.env`, переносит старые фото в `media/`, один раз превращает старые плакаты в картинки (`scripts/migrate_posters.py`).
+4. Создаёт системного пользователя `oqila` (без входа и без домашней папки) и запускает от него сервис **systemd** (`oqila-ai.service`, с `NoNewPrivileges`, `ProtectSystem`, записью только в папку приложения); сервис перезапускается при падении и при перезагрузке сервера.
+5. Ставит ночные задания cron: резервная копия (03:15) и уборка (03:40). Ограничивает журнал systemd (500 МБ, 1 месяц).
+6. Настраивает файервол `ufw` (открыты 22, 80, 443; uvicorn слушает только 127.0.0.1).
+7. Если в `.env` задан `WEBAPP_URL`, ставит конфиг Nginx с вашим доменом (HSTS, CSP, `Referrer-Policy: no-referrer`, лимит запросов на вход, таймаут 180 с для генерации). После включения откройте Mini App в Telegram и `/admin`: слишком строгая CSP проявляется пустым экраном.
+8. Проверяет health check.
+
+### Резервные копии
+
+`scripts/backup.sh` каждую ночь делает согласованную копию базы (через онлайн-API SQLite) и архив `media/` в `backups/`, копии старше 7 дней удаляются (`KEEP_DAYS`). Копия на том же сервере не спасёт при потере сервера, поэтому периодически забирайте папку `backups/` к себе, например:
+
+```bash
+rsync -az --delete user@your-server:/var/www/oqila-ai/backups/ ./oqila-backups/
+```
+
+В копию **не входят** `.env`, `.session_secret` и `.uzum_key`: ключ шифрования Uzum-ключей не должен лежать рядом с базой, которую он защищает. Храните их отдельно (менеджер паролей). Восстановление: остановить сервис, распаковать `oqila_ai-*.db.gz` в `oqila_ai.db`, распаковать `media-*.tar.gz` рядом с приложением, запустить сервис.
+
+### Уборка
+
+`scripts/cleanup_media.py` (cron, раз в сутки; `--dry-run` показывает, что будет удалено): удаляет файлы из `media/`, на которые не ссылается ни одна карточка, логотип или запись и которым больше 7 дней; чистит `usage_logs` старше 90 дней, `ai_calls` старше 30, `ai_reservations` и `telegram_updates` старше 7.
+
+### Проверки качества
+
+CI (`.github/workflows/ci.yml`): `ruff`, `pip-audit`, `pytest`; `npm audit --audit-level=high`, `oxlint`, сборка и проверки в `scripts/check_*.mjs` (отрисовка экранов, i18n, утилиты Telegram, безопасный вывод текста). Запуск локально: `ruff check . && python -m pytest -q`, затем `cd frontend && npx oxlint src && npm run build` и `node scripts/check_i18n.mjs` (и остальные `check_*`).
 
 ### Настройка HTTPS для Telegram Mini App (Nginx + Let's Encrypt):
 Telegram требует HTTPS для Web App URL. Настройте Nginx за 2 минуты:

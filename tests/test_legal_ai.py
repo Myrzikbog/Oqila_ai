@@ -1,6 +1,5 @@
 """The legal assistant: structured answers, tools, sums check, search sources, chats, refusals (the AI is scripted)."""
 import json
-import types
 
 import pytest
 

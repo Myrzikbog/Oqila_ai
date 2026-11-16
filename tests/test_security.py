@@ -15,7 +15,7 @@ def test_path_traversal_does_not_leak_files(client, path):
     assert "FastAPI" not in res.text and "fastapi==" not in res.text and "GEMINI_API_KEY" not in res.text
 
 
-def test_spa_still_served(client):
+def test_spa_still_served(client, stub_frontend):
     res = client.get("/some/deep/link")
     assert res.status_code == 200
     assert "<html" in res.text.lower()

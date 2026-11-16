@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   backend:
-    name: Backend tests
+    name: Backend tests, lint, audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,16 +19,17 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-      - name: Run tests
+        run: pip install -r requirements-dev.txt ruff pip-audit
+      - name: Ruff
+        run: ruff check .
+      - name: Known vulnerabilities in the pinned dependencies
+        run: pip-audit -r requirements.txt
+      - name: Tests (the live Gemini tests are skipped without OQILA_LIVE=1)
         run: python -m pytest -q
 
   frontend:
-    name: Frontend lint & build
+    name: Frontend lint, build, checks
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,8 +38,22 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
+        working-directory: frontend
         run: npm ci
+      - name: Known vulnerabilities (high and above)
+        working-directory: frontend
+        run: npm audit --audit-level=high
       - name: Lint
+        working-directory: frontend
         run: npx oxlint src
       - name: Build
+        working-directory: frontend
         run: npm run build
+      - name: Smoke checks (render, i18n, Telegram utilities, safe text)
+        run: |
+          node scripts/check_i18n.mjs
+          node scripts/check_render.mjs
+          node scripts/check_richtext.mjs
+          node scripts/check_cardview.mjs
+          node scripts/check_legal_card.mjs
+          node scripts/check_telegram_utils.mjs

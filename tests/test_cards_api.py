@@ -8,7 +8,6 @@ import sys
 import types
 from pathlib import Path
 
-import pytest
 from PIL import Image
 
 from conftest import auth, login, media_qs
@@ -221,7 +220,7 @@ def test_old_info_photo_route_and_field_names_still_work(client, monkeypatch):
     online(monkeypatch, [])
     who = login(client, tg_id=971016)
     card = _generate(client, who, "info_dark_list", text_only="true")
-    log = scripted(monkeypatch, [[["Старый клиент"], ["Один"], ["Вес: 1,2 кг"]]], service=ai_module.ai_service)[1]
+    scripted(monkeypatch, [[["Старый клиент"], ["Один"], ["Вес: 1,2 кг"]]], service=ai_module.ai_service)
     body = {"title": "Старый клиент", "benefits": ["Один"], "specs": [{"name": "Вес", "value": "1,2 кг"}], "style": "info_dark_list"}
     res = client.post(f"/api/cards/{card['id']}/info-photo", json=body, headers=auth(who))
     assert res.status_code == 200, res.text

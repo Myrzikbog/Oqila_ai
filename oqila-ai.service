@@ -2,14 +2,23 @@
 Description=Oqila AI FastAPI Service (Tadbirkor Qizlar)
 After=network.target
 
+# deploy.sh writes this file with the real paths; this copy is the template for a manual install.
 [Service]
 Type=simple
-User=root
+# A dedicated system user: a bug in the app cannot touch the rest of the server
+User=oqila
+Group=oqila
 WorkingDirectory=/var/www/oqila-ai
 EnvironmentFile=/var/www/oqila-ai/.env
 ExecStart=/var/www/oqila-ai/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2 --proxy-headers
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+# The app writes only here: the database (and its WAL files), media/, the generated secret files, the poller lock
+ReadWritePaths=/var/www/oqila-ai
 
 [Install]
 WantedBy=multi-user.target

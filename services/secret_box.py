@@ -20,7 +20,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger("oqila_secrets")
 
-TOKEN_PREFIX = "gAAAA"  # every Fernet token starts with the version byte 0x80, i.e. "gAAAA" in base64
+TOKEN_PREFIX = "gAAAA"  # noqa: S105 (not a password)  # every Fernet token starts with the version byte 0x80, i.e. "gAAAA" in base64
 _generated_key: Optional[bytes] = None
 
 

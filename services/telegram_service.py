@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import html
-import io
 import json
 import logging
 import os
@@ -26,13 +25,11 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from services.database import (
-    get_all_users,
     get_user_by_tg_id,
     get_user_lang,
     get_user_terms_agreed,
     log_event,
     save_subscriber,
-    set_user_admin,
     set_user_lang,
     set_user_terms_agreed,
     unsubscribe_subscriber,
@@ -351,7 +348,6 @@ class TelegramService:
         """Map a Telegram user id to the internal users.user_id (None if the user never signed in)."""
         if not tg_id:
             return None
-        from services.database import get_user_by_tg_id
         u = get_user_by_tg_id(int(tg_id))
         return int(u["user_id"]) if u else None
 

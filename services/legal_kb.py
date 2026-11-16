@@ -200,7 +200,7 @@ class KnowledgeBase:
         ids = [i for section in self._MOCK_SECTIONS for i in section]
         titles = self._MOCK_TITLES[lang]
         steps = []
-        for title, section in zip(titles, self._MOCK_SECTIONS):
+        for title, section in zip(titles, self._MOCK_SECTIONS, strict=True):
             steps.append(f"{title}: " + " ".join(self.fact_text(i, lang) for i in section))
         return {
             "short_answer": {"ru": "Коротко о проверенных правилах для предпринимательниц (ИИ сейчас недоступен, это шаблонный справочник, а не ответ на ваш вопрос).",

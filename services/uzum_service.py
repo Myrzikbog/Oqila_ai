@@ -14,22 +14,17 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 import html
-import json
 import logging
-import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 
 from services.database import (
     get_connected_uzum_user_ids,
-    get_uzum_finance_summary,
     get_uzum_notifiable_user_ids,
     get_uzum_order,
-    get_uzum_orders,
     get_uzum_settings,
     get_uzum_shops,
-    get_uzum_stocks,
     get_unnotified_uzum_orders,
     log_uzum_notification,
     mark_order_notified,
@@ -39,8 +34,6 @@ from services.database import (
     save_uzum_shops,
     save_uzum_stocks,
     update_uzum_order_status,
-    update_uzum_price,
-    update_uzum_stock_amount,
 )
 from services.barcode import barcode_bars, sanitize_barcode_text
 from services.telegram_service import telegram_service
@@ -1080,7 +1073,7 @@ class UzumService:
                         },
                         {
                             "text": "📱 Oqila ilovasini ochish",
-                            "url": f"https://t.me/oqila_ai_bot",
+                            "url": "https://t.me/oqila_ai_bot",
                         },
                     ],
                 ]

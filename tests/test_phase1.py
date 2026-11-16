@@ -1,7 +1,6 @@
 """Critical fixes of the master plan, phase 1: admin login, AI budget, atomic limits, fallbacks, uploads, tokens."""
 import asyncio
 import io
-import re
 import sqlite3
 import threading
 import time

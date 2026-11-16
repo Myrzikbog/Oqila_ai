@@ -642,12 +642,12 @@ def parse_ocr(data: Any) -> List[List[str]]:
         blocks = []
         for block in data["blocks"]:
             lines = block.get("lines") if isinstance(block, dict) else block if isinstance(block, list) else [block]
-            lines = [text(l).strip() for l in (lines or [])]
+            lines = [text(x).strip() for x in (lines or [])]
             if any(lines):
-                blocks.append([l for l in lines if l])
+                blocks.append([x for x in lines if x])
         return blocks
     lines = data.get("lines", []) if isinstance(data, dict) else data if isinstance(data, list) else []
-    return [[text(l).strip()] for l in lines if text(l).strip()]  # no grouping given: every line is its own block
+    return [[text(x).strip()] for x in lines if text(x).strip()]  # no grouping given: every line is its own block
 
 
 # ---------------------------------------------------------------------------

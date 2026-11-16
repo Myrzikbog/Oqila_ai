@@ -8,7 +8,6 @@ answer can be checked afterwards (services/legal_ai.py: check_amounts).
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 

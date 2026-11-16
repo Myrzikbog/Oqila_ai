@@ -1,5 +1,4 @@
 """Phase 4 backend: downloads, send to chat, original photo, export tokens, language kept on the server."""
-import asyncio
 
 from conftest import ADMIN_KEY, auth, login, media_qs
 from services.imaging import finalize_card

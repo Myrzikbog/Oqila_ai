@@ -1,1 +1,0 @@
-import{i as e,n as t}from"./jsx-runtime-Dk72oS4N.js";import{d as n,f as r}from"./index-BcBq4N8J.js";var i=e(t(),1);function a(e,t){(0,i.useEffect)(()=>{if(e)return n(t)},[e,t])}function o(e){(0,i.useEffect)(()=>(r(!!e),()=>r(!1)),[e])}export{a as n,o as t};
